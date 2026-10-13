@@ -311,7 +311,7 @@ export function Settings() {
 
       <section className="card">
         <h2 className="card-title">Informazioni</h2>
-        <p className="small">SkiWork {__APP_VERSION__} · nessuna AI, nessuna telemetria, nessun servizio a pagamento. Tutti i calcoli sono deterministici e documentati in docs/CALCOLI.md. <a href="./privacy.html">Informativa sulla privacy</a></p>
+        <p className="small">SkiWork {__APP_VERSION__} · nessuna AI, nessuna telemetria, nessun servizio a pagamento. Tutti i calcoli sono deterministici e documentati in docs/CALCOLI.md. <a href="./privacy.html">Informativa sulla privacy</a> · <a href="./termini.html">Termini di servizio</a></p>
       </section>
 
       {client && <ClientEditor client={client} onClose={() => setClient(null)} />}
