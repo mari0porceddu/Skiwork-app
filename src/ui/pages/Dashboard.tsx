@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { backupNudge } from '../../domain/backupNudge';
-import { backupRecords, createBackupFile, isIosBrowserTab } from '../backupActions';
+import { backupRecords, createBackupFile } from '../backupActions';
 import { driveAvailable, driveToken, startDriveAuth } from '../../sync/drive';
 import { syncToDrive } from '../../sync/driveSync';
 import { needsPush } from '../../domain/gcal';
@@ -245,23 +245,31 @@ export function Dashboard() {
   );
 }
 
-/** Avvisi per non perdere i dati: app non installata su iPhone e backup da fare. */
+/** Avvisi per non perdere i dati: Google Drive da collegare o riconnettere, backup da fare. */
 function BackupBanner() {
   const { data, toast } = useApp();
   const [busy, setBusy] = useState(false);
   const records = backupRecords(data);
   const n = backupNudge(data.settings.lastBackupAt, records, new Date());
-  const notInstalled = isIosBrowserTab();
   const useDrive = data.settings.driveSync && driveAvailable();
-  if (!n.show && !notInstalled) return null;
+  const driveNotice = !driveAvailable() ? null : !data.settings.driveSync ? 'connect' : !driveToken() ? 'expired' : null;
+  const showNudge = n.show && driveNotice !== 'expired';
+  if (!showNudge && !driveNotice) return null;
   return (
     <section className="card">
-      {notInstalled && (
-        <p className="alert warning">
-          Stai usando SkiWork dentro Safari: qui iOS può cancellare i dati dopo alcuni giorni senza uso. Installala con Condividi → <strong>Aggiungi alla schermata Home</strong> e aprila sempre dall’icona.
-        </p>
+      {driveNotice && (
+        <>
+          <p className="alert warning">
+            {driveNotice === 'connect'
+              ? 'Google Drive non è collegato: i dati restano solo su questo dispositivo. Collegalo per salvarli in automatico.'
+              : 'L’accesso a Google Drive è scaduto: le modifiche non vengono salvate finché non ti riconnetti.'}
+          </p>
+          <button className="btn primary" onClick={() => startDriveAuth(driveNotice === 'connect' ? 'drive' : 'reconnect')}>
+            {driveNotice === 'connect' ? 'Collega Google Drive' : 'Riconnetti Google Drive'}
+          </button>
+        </>
       )}
-      {n.show && (
+      {showNudge && (
         <>
           <p className="alert warning">
             {n.days === null ? 'Non hai ancora fatto un backup.' : `Ultimo backup ${n.days === 0 ? 'oggi' : n.days === 1 ? 'ieri' : `${n.days} giorni fa`}, da allora ${n.changes} modifiche.`} {useDrive ? (driveToken() ? 'Ci sono modifiche non ancora salvate su Google Drive.' : 'Per continuare a salvare su Google Drive tocca Riconnetti (l’accesso Google scade dopo un’ora).') : 'I dati sono solo su questo telefono: salva una copia su iCloud Drive (Salva su File).'}
@@ -304,7 +312,8 @@ function CalendarCards() {
   const clients = new Map(data.clients.map((c) => [c.id, c]));
   const stale = !s.calendarLastSyncAt || Date.now() - new Date(s.calendarLastSyncAt).getTime() > 12 * 3_600_000;
   const pending = s.gcalPendingDeletes.length > 0 || data.activities.some(needsPush);
-  const reconnect = s.calendarSync && driveAvailable() && !driveToken() && (stale || pending);
+  // con Drive attivo la riconnessione è già proposta dall'avviso di Drive
+  const reconnect = s.calendarSync && !s.driveSync && driveAvailable() && !driveToken() && (stale || pending);
   if (todo.length === 0 && !reconnect) return null;
   return (
     <>
