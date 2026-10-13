@@ -311,7 +311,7 @@ export function Settings() {
 
       <section className="card">
         <h2 className="card-title">Informazioni</h2>
-        <p className="small">SkiWork {__APP_VERSION__} · nessuna AI, nessuna telemetria, nessun servizio a pagamento. Tutti i calcoli sono deterministici e documentati in docs/CALCOLI.md.</p>
+        <p className="small">SkiWork {__APP_VERSION__} · nessuna AI, nessuna telemetria, nessun servizio a pagamento. Tutti i calcoli sono deterministici e documentati in docs/CALCOLI.md. <a href="./privacy.html">Informativa sulla privacy</a></p>
       </section>
 
       {client && <ClientEditor client={client} onClose={() => setClient(null)} />}
@@ -621,7 +621,7 @@ function DriveSection() {
       <h3>Salvataggio automatico su Google Drive</h3>
       {!s.driveSync ? (
         <>
-          <p className="muted">Salva da solo una copia dei dati nel tuo Google Drive, in una cartella riservata all’app. Così i dati restano anche se cancelli l’app o cambi telefono: basta ricollegare lo stesso account.</p>
+          <p className="muted">Salva da solo una copia dei dati nel tuo Google Drive, in una cartella riservata all’app. Così i dati restano anche se cancelli l’app o cambi telefono: basta ricollegare lo stesso account. <a href="./privacy.html">Privacy</a></p>
           <button className="btn primary" onClick={startDriveAuth}>
             Collega Google Drive
           </button>
