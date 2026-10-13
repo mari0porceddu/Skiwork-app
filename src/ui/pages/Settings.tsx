@@ -19,8 +19,9 @@ import {
   type RoundingMode,
 } from '../../domain/types';
 import { db } from '../../db/db';
-import { exportBackup, mergeBackup, parseBackupText, restoreBackup } from '../../db/backup';
+import { mergeBackup, parseBackupText, restoreBackup } from '../../db/backup';
 import { deleteRecord, importIcsEvents, saveClientAndRealignShifts, saveRecord, setSetting } from '../../db/repo';
+import { createBackupFile } from '../backupActions';
 import { SHIFT_KEYS, SHIFT_LABEL, shiftTimes } from '../../domain/shifts';
 import { EmptyState, Field, MoneyInput, Segmented } from '../components/fields';
 import { Sheet } from '../components/Sheet';
@@ -44,9 +45,7 @@ export function Settings() {
   const clientsById = new Map(data.clients.map((c) => [c.id, c]));
 
   async function doBackup() {
-    const b = await exportBackup();
-    await saveFile(`skiwork-backup-${todayISO()}.json`, JSON.stringify(b, null, 2), 'application/json');
-    await setSetting('lastBackupAt', new Date().toISOString());
+    await createBackupFile();
     toast('Backup creato');
   }
 

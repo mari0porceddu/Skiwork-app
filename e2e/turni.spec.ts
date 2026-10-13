@@ -36,5 +36,7 @@ test('turni e livello: orari da impostazioni, scelta rapida e livello nell’att
   await ed.getByLabel('Pomeriggio: inizio', { exact: true }).fill('13:30');
   await ed.getByRole('button', { name: 'Salva' }).click();
   await expect(page.getByText('orari aggiornati su 1 attività').last()).toBeVisible();
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Salva backup ora' })).toBeVisible();
   expect(errors).toEqual([]);
 });

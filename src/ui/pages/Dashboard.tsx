@@ -1,4 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { backupNudge } from '../../domain/backupNudge';
+import { createBackupFile, isIosBrowserTab } from '../backupActions';
 import { goalCurrentValue, goalProgress } from '../../domain/goals';
 import { applyBps, formatBps, formatEuro, sumCents } from '../../domain/money';
 import { computeReminders } from '../../domain/reminders';
@@ -81,6 +83,8 @@ export function Dashboard() {
           <h1>Dashboard</h1>
         </div>
       </header>
+
+      <BackupBanner />
 
       <section className="card highlight">
         <h2 className="card-title">Prossimo impegno</h2>
@@ -234,5 +238,46 @@ export function Dashboard() {
         ))}
       </section>
     </div>
+  );
+}
+
+/** Avvisi per non perdere i dati: app non installata su iPhone e backup da fare. */
+function BackupBanner() {
+  const { data, toast } = useApp();
+  const [busy, setBusy] = useState(false);
+  const records = [...data.activities, ...data.documents, ...data.payments, ...data.rates, ...data.clients, ...data.goals];
+  const n = backupNudge(data.settings.lastBackupAt, records, new Date());
+  const notInstalled = isIosBrowserTab();
+  if (!n.show && !notInstalled) return null;
+  return (
+    <section className="card">
+      {notInstalled && (
+        <p className="alert warning">
+          Stai usando SkiWork dentro Safari: qui iOS può cancellare i dati dopo alcuni giorni senza uso. Installala con Condividi → <strong>Aggiungi alla schermata Home</strong> e aprila sempre dall’icona.
+        </p>
+      )}
+      {n.show && (
+        <>
+          <p className="alert warning">
+            {n.days === null ? 'Non hai ancora fatto un backup.' : `Ultimo backup ${n.days === 0 ? 'oggi' : n.days === 1 ? 'ieri' : `${n.days} giorni fa`}, da allora ${n.changes} modifiche.`} I dati sono solo su questo telefono: salva una copia su iCloud Drive (Salva su File).
+          </p>
+          <button
+            className="btn primary"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await createBackupFile();
+                toast('Backup creato');
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Salva backup ora
+          </button>
+        </>
+      )}
+    </section>
   );
 }
