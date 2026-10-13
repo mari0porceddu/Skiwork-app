@@ -13,6 +13,7 @@ import { Settings } from './pages/Settings';
 import { Fiscal } from './pages/Fiscal';
 import { href, useRoute, type RouteName } from './router';
 import { useApp } from './context';
+import { useDriveAutoSync } from '../sync/driveSync';
 
 const NAV: { name: RouteName; label: string; icon: string; primary: boolean }[] = [
   { name: 'dashboard', label: 'Home', icon: '⌂', primary: true },
@@ -49,7 +50,8 @@ function Page() {
 
 function Shell() {
   const route = useRoute();
-  const { openActivity } = useApp();
+  const { openActivity, data } = useApp();
+  useDriveAutoSync(data);
   const secondaryActive = NAV.some((n) => !n.primary && n.name === route.name);
   return (
     <div className="shell">

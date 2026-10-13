@@ -34,6 +34,9 @@ export interface AppSettings {
   reminders: ReminderSettings;
   manualSetAsideBps: number | null;
   lastBackupAt: string | null;
+  /** Salvataggio automatico su Google Drive attivo su questo dispositivo. */
+  driveSync: boolean;
+  driveLastSyncAt: string | null;
   /** Inizio e fine stagione (MM-DD), configurabili. */
   seasonStart: string;
   seasonEnd: string;
@@ -52,6 +55,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   reminders: DEFAULT_REMINDER_SETTINGS,
   manualSetAsideBps: null,
   lastBackupAt: null,
+  driveSync: false,
+  driveLastSyncAt: null,
   seasonStart: '11-01',
   seasonEnd: '04-30',
   fiscalProfile: {},

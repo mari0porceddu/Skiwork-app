@@ -1,7 +1,8 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { db } from './db/db';
-import { ensureSeed } from './db/repo';
+import { ensureSeed, setSetting } from './db/repo';
+import { consumeAuthRedirect } from './sync/drive';
 import { App } from './ui/App';
 import './ui/styles.css';
 
@@ -10,6 +11,8 @@ async function start() {
   try {
     await db.open();
     await ensureSeed();
+    // Ritorno dalla pagina di accesso Google: attiva il salvataggio su Drive su questo dispositivo.
+    if (consumeAuthRedirect().kind === 'ok') await setSetting('driveSync', true);
     // Chiede al browser di non eliminare automaticamente i dati (best effort).
     void navigator.storage?.persist?.();
   } catch (e) {

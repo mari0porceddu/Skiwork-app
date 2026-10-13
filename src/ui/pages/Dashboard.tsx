@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { backupNudge } from '../../domain/backupNudge';
-import { createBackupFile, isIosBrowserTab } from '../backupActions';
+import { backupRecords, createBackupFile, isIosBrowserTab } from '../backupActions';
+import { driveAvailable, driveToken, startDriveAuth } from '../../sync/drive';
+import { syncToDrive } from '../../sync/driveSync';
 import { goalCurrentValue, goalProgress } from '../../domain/goals';
 import { applyBps, formatBps, formatEuro, sumCents } from '../../domain/money';
 import { computeReminders } from '../../domain/reminders';
@@ -245,9 +247,10 @@ export function Dashboard() {
 function BackupBanner() {
   const { data, toast } = useApp();
   const [busy, setBusy] = useState(false);
-  const records = [...data.activities, ...data.documents, ...data.payments, ...data.rates, ...data.clients, ...data.goals];
+  const records = backupRecords(data);
   const n = backupNudge(data.settings.lastBackupAt, records, new Date());
   const notInstalled = isIosBrowserTab();
+  const useDrive = data.settings.driveSync && driveAvailable();
   if (!n.show && !notInstalled) return null;
   return (
     <section className="card">
@@ -259,7 +262,7 @@ function BackupBanner() {
       {n.show && (
         <>
           <p className="alert warning">
-            {n.days === null ? 'Non hai ancora fatto un backup.' : `Ultimo backup ${n.days === 0 ? 'oggi' : n.days === 1 ? 'ieri' : `${n.days} giorni fa`}, da allora ${n.changes} modifiche.`} I dati sono solo su questo telefono: salva una copia su iCloud Drive (Salva su File).
+            {n.days === null ? 'Non hai ancora fatto un backup.' : `Ultimo backup ${n.days === 0 ? 'oggi' : n.days === 1 ? 'ieri' : `${n.days} giorni fa`}, da allora ${n.changes} modifiche.`} {useDrive ? (driveToken() ? 'Ci sono modifiche non ancora salvate su Google Drive.' : 'Per continuare a salvare su Google Drive tocca Riconnetti (l’accesso Google scade dopo un’ora).') : 'I dati sono solo su questo telefono: salva una copia su iCloud Drive (Salva su File).'}
           </p>
           <button
             className="btn primary"
@@ -267,14 +270,23 @@ function BackupBanner() {
             onClick={async () => {
               setBusy(true);
               try {
-                await createBackupFile();
-                toast('Backup creato');
+                if (useDrive) {
+                  const token = driveToken();
+                  if (!token) return startDriveAuth();
+                  await syncToDrive(token, data.settings.driveLastSyncAt === null);
+                  toast('Salvato su Google Drive');
+                } else {
+                  await createBackupFile();
+                  toast('Backup creato');
+                }
+              } catch (e) {
+                toast(`Salvataggio non riuscito: ${(e as Error).message}`, 'error');
               } finally {
                 setBusy(false);
               }
             }}
           >
-            Salva backup ora
+            {useDrive ? (driveToken() ? 'Salva su Google Drive ora' : 'Riconnetti Google Drive') : 'Salva backup ora'}
           </button>
         </>
       )}

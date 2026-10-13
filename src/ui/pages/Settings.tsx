@@ -22,6 +22,8 @@ import { db } from '../../db/db';
 import { mergeBackup, parseBackupText, restoreBackup } from '../../db/backup';
 import { deleteRecord, importIcsEvents, saveClientAndRealignShifts, saveRecord, setSetting } from '../../db/repo';
 import { createBackupFile } from '../backupActions';
+import { driveAvailable, driveToken, forgetDriveToken, startDriveAuth, takeAuthResult } from '../../sync/drive';
+import { recoverFromDrive, syncToDrive } from '../../sync/driveSync';
 import { SHIFT_KEYS, SHIFT_LABEL, shiftTimes } from '../../domain/shifts';
 import { EmptyState, Field, MoneyInput, Segmented } from '../components/fields';
 import { Sheet } from '../components/Sheet';
@@ -250,6 +252,7 @@ export function Settings() {
             </button>
           )}
         </p>
+        {driveAvailable() && <DriveSection />}
         <p className="muted">“Ripristina” sostituisce tutti i dati con quelli del file. “Aggiungi dati” invece unisce il file ai dati attuali senza cancellare nulla: le attività già presenti vengono ignorate e i committenti con lo stesso nome vengono riconosciuti.</p>
         <div className="btn-group wrap">
           <button className="btn primary" onClick={doBackup}>
@@ -590,5 +593,77 @@ function RateEditor({ rate, clientName, onClose }: { rate: Rate; clientName: str
         )}
       </div>
     </Sheet>
+  );
+}
+
+function DriveSection() {
+  const { data, toast } = useApp();
+  const [busy, setBusy] = useState(false);
+  const s = data.settings;
+  const token = driveToken();
+  useEffect(() => {
+    const r = takeAuthResult();
+    if (r.kind === 'ok') toast('Google Drive collegato: salvataggio automatico attivo');
+    if (r.kind === 'error') toast(r.message, 'error');
+  }, [toast]);
+  async function run(fn: () => Promise<void>) {
+    setBusy(true);
+    try {
+      await fn();
+    } catch (e) {
+      toast(`Google Drive: ${(e as Error).message}`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="drive-box">
+      <h3>Salvataggio automatico su Google Drive</h3>
+      {!s.driveSync ? (
+        <>
+          <p className="muted">Salva da solo una copia dei dati nel tuo Google Drive, in una cartella riservata all’app. Così i dati restano anche se cancelli l’app o cambi telefono: basta ricollegare lo stesso account.</p>
+          <button className="btn primary" onClick={startDriveAuth}>
+            Collega Google Drive
+          </button>
+        </>
+      ) : (
+        <>
+          <p className={`alert ${token ? 'info' : 'warning'}`}>
+            Ultimo salvataggio su Drive: <strong>{s.driveLastSyncAt ? `${formatDateShort(s.driveLastSyncAt.slice(0, 10))} ${s.driveLastSyncAt.slice(11, 16)} UTC` : 'mai'}</strong>.{' '}
+            {token ? 'Ogni modifica viene salvata automaticamente quando c’è rete.' : 'L’accesso Google è scaduto: tocca Riconnetti per riprendere il salvataggio.'}
+          </p>
+          <div className="btn-group wrap">
+            {token ? (
+              <>
+                <button className="btn primary" disabled={busy} onClick={() => run(async () => {
+                  const m = await syncToDrive(token, s.driveLastSyncAt === null);
+                  toast(m ? `Salvato su Drive (recuperate ${m.activities} attività)` : 'Salvato su Google Drive');
+                })}>
+                  Salva ora
+                </button>
+                <button className="btn" disabled={busy} onClick={() => run(async () => {
+                  const m = await recoverFromDrive(token);
+                  toast(m ? `Recuperate ${m.activities} attività da Drive (${m.skippedDuplicates} già presenti)` : 'Nessuna copia trovata su Drive');
+                })}>
+                  Recupera da Drive
+                </button>
+              </>
+            ) : (
+              <button className="btn primary" onClick={startDriveAuth}>
+                Riconnetti
+              </button>
+            )}
+            <button className="btn ghost" disabled={busy} onClick={() => run(async () => {
+              forgetDriveToken();
+              await setSetting('driveSync', false);
+              await setSetting('driveLastSyncAt', null);
+              toast('Google Drive scollegato da questo dispositivo (la copia su Drive resta)');
+            })}>
+              Scollega
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
