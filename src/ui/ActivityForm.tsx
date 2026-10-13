@@ -3,6 +3,7 @@ import { computeActivity, findApplicableRate, toAppliedRate } from '../domain/co
 import { newId } from '../domain/ids';
 import { formatEuro } from '../domain/money';
 import { detectConflicts, expandWeekly } from '../domain/schedule';
+import { SHIFT_KEYS, SHIFT_LABEL, shiftTimes, type ShiftKey } from '../domain/shifts';
 import { addDays, crossesMidnight, formatMinutesAsHours, isValidDate, isValidTime, nowHHmm, spanMinutes, todayISO, weekday, weekdayShort } from '../domain/time';
 import {
   ACTIVITY_STATUS_LABEL,
@@ -40,6 +41,7 @@ export function ActivityForm({ req, onClose }: { req: ActivityFormRequest; onClo
   const [date, setDate] = useState(editing?.date ?? req.date ?? todayISO());
   const [start, setStart] = useState(editing?.start ?? req.start ?? s.usualStart);
   const [end, setEnd] = useState(editing?.end ?? req.end ?? s.usualEnd);
+  const [shift, setShift] = useState<ShiftKey | null>(editing?.shift ?? null);
   const [statusTouched, setStatusTouched] = useState(!!editing);
   const [status, setStatusRaw] = useState<ActivityStatus>(editing?.status ?? defaultStatus(date, end, start));
 
@@ -92,6 +94,13 @@ export function ActivityForm({ req, onClose }: { req: ActivityFormRequest; onClo
   }, [work, effectiveChoice, manualAmount, manualMode, data.rates, editing]);
 
   const timesValid = isValidTime(start) && isValidTime(end) && spanMinutes(start, end) > 0;
+  const shiftClient = data.clients.find((c) => c.id === clientId);
+  function applyTimes(st: string, en: string) {
+    setStart(st);
+    setEnd(en);
+    autoStatus(date, st, en);
+  }
+
   const draft: Activity | null =
     isValidDate(date) && timesValid
       ? {
@@ -114,6 +123,7 @@ export function ActivityForm({ req, onClose }: { req: ActivityFormRequest; onClo
           cancellationFeeCents: cancelFee ?? 0,
           reminderMinutesBefore: reminder.trim() === '' ? null : Math.max(0, parseInt(reminder, 10) || 0),
           seriesId: editing?.seriesId,
+          shift: work && shift ? shift : undefined,
           externalUid: editing?.externalUid,
           createdAt: editing?.createdAt ?? '',
           updatedAt: editing?.updatedAt ?? '',
@@ -301,6 +311,9 @@ export function ActivityForm({ req, onClose }: { req: ActivityFormRequest; onClo
                 value={clientId ?? ''}
                 onChange={(e) => {
                   setClientId(e.target.value || null);
+                  const t = shift ? shiftTimes(data.clients.find((c) => c.id === e.target.value), shift) : null;
+                  if (t) applyTimes(t.start, t.end);
+                  else setShift(null);
                   if (rateChoice !== 'manual' && rateChoice !== 'none') setRateChoice('auto');
                 }}
               >
@@ -313,6 +326,27 @@ export function ActivityForm({ req, onClose }: { req: ActivityFormRequest; onClo
               </select>
             )}
           </Field>
+        )}
+
+        {work && shiftClient && SHIFT_KEYS.some((k) => shiftTimes(shiftClient, k)) && (
+          <div className="chips" role="group" aria-label="Turno">
+            {SHIFT_KEYS.filter((k) => shiftTimes(shiftClient, k)).map((k) => (
+              <button
+                key={k}
+                type="button"
+                className={`chip${shift === k ? ' active' : ''}`}
+                aria-pressed={shift === k}
+                onClick={() => {
+                  if (shift === k) return setShift(null);
+                  const t = shiftTimes(shiftClient, k)!;
+                  setShift(k);
+                  applyTimes(t.start, t.end);
+                }}
+              >
+                {SHIFT_LABEL[k]}
+              </button>
+            ))}
+          </div>
         )}
 
         <div className="row3">
@@ -337,6 +371,7 @@ export function ActivityForm({ req, onClose }: { req: ActivityFormRequest; onClo
                 value={start}
                 onChange={(e) => {
                   setStart(e.target.value);
+                  setShift(null);
                   autoStatus(date, e.target.value, end);
                 }}
               />
@@ -350,6 +385,7 @@ export function ActivityForm({ req, onClose }: { req: ActivityFormRequest; onClo
                 value={end}
                 onChange={(e) => {
                   setEnd(e.target.value);
+                  setShift(null);
                   autoStatus(date, start, e.target.value);
                 }}
               />

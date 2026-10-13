@@ -35,6 +35,7 @@ export const clientSchema = z.object({
   adminNotes: z.string(),
   notes: z.string(),
   active: z.boolean(),
+  shifts: z.record(z.enum(['morning', 'afternoon', 'full_day']), z.object({ start: time, end: time })).optional(),
   createdAt: stamp,
   updatedAt: stamp,
 });
@@ -71,6 +72,7 @@ export const activitySchema = z.object({
   cancellationFeeCents: cents,
   reminderMinutesBefore: z.number().int().min(0).nullable(),
   seriesId: id.optional(),
+  shift: z.enum(['morning', 'afternoon', 'full_day']).optional(),
   externalUid: z.string().optional(),
   createdAt: stamp,
   updatedAt: stamp,

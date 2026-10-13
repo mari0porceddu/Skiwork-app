@@ -20,7 +20,8 @@ import {
 } from '../../domain/types';
 import { db } from '../../db/db';
 import { exportBackup, parseBackupText, restoreBackup } from '../../db/backup';
-import { deleteRecord, importIcsEvents, saveRecord, setSetting } from '../../db/repo';
+import { deleteRecord, importIcsEvents, saveClientAndRealignShifts, saveRecord, setSetting } from '../../db/repo';
+import { SHIFT_KEYS, SHIFT_LABEL, shiftTimes } from '../../domain/shifts';
 import { EmptyState, Field, MoneyInput, Segmented } from '../components/fields';
 import { Sheet } from '../components/Sheet';
 import { useApp } from '../context';
@@ -350,8 +351,16 @@ function ClientEditor({ client, onClose }: { client: Client; onClose: () => void
 
   async function save() {
     if (c.name.trim() === '') return setError('Inserisci il nome');
-    await saveRecord('clients', { ...c, name: c.name.trim() });
-    toast('Committente salvato');
+    for (const k of SHIFT_KEYS) {
+      const t = c.shifts?.[k];
+      if (t && (t.start || t.end) && !shiftTimes(c, k)) return setError(`Orari del turno ${SHIFT_LABEL[k].toLowerCase()} non validi`);
+    }
+    const shifts = Object.fromEntries(SHIFT_KEYS.flatMap((k) => (shiftTimes(c, k) ? [[k, c.shifts![k]!]] : [])));
+    const next: Client = { ...c, name: c.name.trim() };
+    if (Object.keys(shifts).length > 0) next.shifts = shifts;
+    else delete next.shifts;
+    const moved = await saveClientAndRealignShifts(next);
+    toast(moved > 0 ? `Committente salvato, orari aggiornati su ${moved} attività` : 'Committente salvato');
     onClose();
   }
   async function remove() {
@@ -410,6 +419,14 @@ function ClientEditor({ client, onClose }: { client: Client; onClose: () => void
           <Field label="Colore nel calendario">{(id) => <input id={id} type="color" value={c.color} onChange={(e) => set({ color: e.target.value })} />}</Field>
           <Field label="Tempo di trasferimento (min)">{(id) => <input id={id} inputMode="numeric" value={c.travelMinutes} onChange={(e) => set({ travelMinutes: parseInt(e.target.value.replace(/\D/g, ''), 10) || 0 })} />}</Field>
         </div>
+        <h3>Turni</h3>
+        <p className="muted">Orari usati quando segni un’attività come mattina, pomeriggio o giornata intera. Se li cambi, si aggiornano anche le attività non ancora svolte. Lascia vuoto un turno che non usi.</p>
+        {SHIFT_KEYS.map((k) => (
+          <div className="row2" key={k}>
+            <Field label={`${SHIFT_LABEL[k]}: inizio`}>{(id) => <input id={id} type="time" value={c.shifts?.[k]?.start ?? ''} onChange={(e) => set({ shifts: { ...c.shifts, [k]: { start: e.target.value, end: c.shifts?.[k]?.end ?? '' } } })} />}</Field>
+            <Field label={`${SHIFT_LABEL[k]}: fine`}>{(id) => <input id={id} type="time" value={c.shifts?.[k]?.end ?? ''} onChange={(e) => set({ shifts: { ...c.shifts, [k]: { start: c.shifts?.[k]?.start ?? '', end: e.target.value } } })} />}</Field>
+          </div>
+        ))}
         <h3>Amministrazione</h3>
         <Field label="Modalità di documentazione">{(id) => <input id={id} value={c.documentationMode} onChange={(e) => set({ documentationMode: e.target.value })} />}</Field>
         <div className="row2">

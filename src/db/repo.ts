@@ -5,6 +5,7 @@
 import { ECONOMIC_FIELDS } from '../domain/compensation';
 import { newId } from '../domain/ids';
 import { planIcsImport, type IcsEvent } from '../domain/ics';
+import { planShiftRealign } from '../domain/shifts';
 import type { Activity, AuditEntry, Client, ID } from '../domain/types';
 import { db } from './db';
 
@@ -71,11 +72,25 @@ export async function saveActivity(activity: Activity, reason = ''): Promise<Act
     const next: Activity = { ...activity, createdAt: before?.createdAt ?? stamp, updatedAt: stamp };
     if (next.externalUid === undefined || next.externalUid === '') delete next.externalUid;
     if (next.seriesId === undefined) delete next.seriesId;
+    if (next.shift === undefined) delete next.shift;
     await db.activities.put(next);
     const changes = diff(before, next);
     if (!before) await audit('activities', next.id, 'create', changes, reason);
     else if (Object.keys(changes).length > 0) await audit('activities', next.id, changes.status && Object.keys(changes).length === 1 ? 'status' : 'update', changes, reason);
     return next;
+  });
+}
+
+/**
+ * Salva il committente e riallinea agli orari dei turni le sue attività pianificate o confermate.
+ * Restituisce il numero di attività aggiornate.
+ */
+export async function saveClientAndRealignShifts(client: Client): Promise<number> {
+  return db.transaction('rw', db.clients, db.activities, db.audit, async () => {
+    const saved = await saveRecord('clients', client);
+    const changed = planShiftRealign(saved, await db.activities.where('clientId').equals(client.id).toArray());
+    for (const a of changed) await saveActivity(a, 'Orari del turno aggiornati');
+    return changed.length;
   });
 }
 

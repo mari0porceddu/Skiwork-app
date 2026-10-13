@@ -1,5 +1,6 @@
 import type { Cents } from './money';
 import type { HHmm, ISODate } from './time';
+import type { ClientShifts, ShiftKey } from './shifts';
 
 export type ID = string;
 
@@ -29,6 +30,8 @@ export interface Client {
   adminNotes: string;
   notes: string;
   active: boolean;
+  /** Orari dei turni (mattina, pomeriggio, giornata intera), se usati con questo committente. */
+  shifts?: ClientShifts;
   createdAt: string;
   updatedAt: string;
 }
@@ -153,6 +156,8 @@ export interface Activity {
   reminderMinutesBefore: number | null;
   /** Serie ricorrente di appartenenza. */
   seriesId?: ID;
+  /** Turno (mattina, pomeriggio, giornata intera): gli orari seguono quelli del committente. */
+  shift?: ShiftKey;
   /** UID esterno (es. importazione ICS) per evitare duplicati. Mai null: assente se non presente. */
   externalUid?: string;
   createdAt: string;

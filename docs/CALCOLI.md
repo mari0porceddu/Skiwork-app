@@ -89,3 +89,7 @@ Questa struttura è uno schema configurabile, non una certificazione: va conferm
 **Accantonamento manuale.** `% scelta × incassato dell'anno`, indicato come scelta prudenziale e non come calcolo fiscale; disponibile anche senza parametri.
 
 **Scadenze fiscali.** Inserite dall'utente (nessun calendario fiscale predefinito); generano promemoria entro l'anticipo configurato.
+
+## Turni (mattina, pomeriggio, giornata intera)
+
+Ogni committente può avere orari per i turni "Mattina", "Pomeriggio" e "Giornata intera" (Impostazioni → committente → Turni). Un'attività segnata con un turno prende quegli orari; ore e compensi si calcolano poi sugli orari come per ogni altra attività. Se gli orari di un turno cambiano, si aggiornano (con voce nel registro modifiche) solo le attività pianificate o confermate di quel committente: quelle completate o cancellate conservano gli orari registrati. Modificare a mano inizio o fine toglie il turno dall'attività.
