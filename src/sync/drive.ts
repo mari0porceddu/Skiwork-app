@@ -6,7 +6,9 @@
  */
 import { GOOGLE_CLIENT_ID } from '../config';
 
-const SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+/** Solo calendari creati dall'app (il calendario "SkiWork") e i loro eventi. */
+export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.app.created';
 const FILE_NAME = 'skiwork-backup.json';
 const KEY = 'skiwork.drive';
 const STATE_KEY = 'skiwork.drive.state';
@@ -14,10 +16,17 @@ const STATE_KEY = 'skiwork.drive.state';
 interface Stored {
   token: string;
   expiresAt: number;
+  scope?: string;
   fileId?: string;
 }
 
 export class DriveAuthError extends Error {}
+
+export class GoogleApiError extends Error {
+  constructor(public status: number) {
+    super(`Google ha risposto ${status}`);
+  }
+}
 
 export const driveAvailable = (): boolean => GOOGLE_CLIENT_ID !== '';
 
@@ -45,6 +54,11 @@ export function driveToken(now = Date.now()): string | null {
   return s && s.expiresAt - 60_000 > now ? s.token : null;
 }
 
+/** Permessi concessi dall'utente con l'ultimo accesso (può togliere quelli che non vuole). */
+export function grantedScope(scope: string): boolean {
+  return (read()?.scope ?? '').split(' ').includes(scope);
+}
+
 export function forgetDriveToken(): void {
   write(null);
 }
@@ -54,15 +68,20 @@ export function redirectUri(): string {
 }
 
 /** Porta alla pagina di accesso Google; al ritorno l'app riparte e chiama consumeAuthRedirect. */
-export function startDriveAuth(): void {
+/** drive/calendar: attiva la funzione al ritorno; reconnect: rinnova solo l'accesso. */
+export type AuthIntent = 'drive' | 'calendar' | 'reconnect';
+const INTENT_KEY = 'skiwork.google.intent';
+
+export function startDriveAuth(intent: AuthIntent = 'drive'): void {
   const state = crypto.randomUUID();
   try {
+    localStorage.setItem(INTENT_KEY, intent);
     sessionStorage.setItem(STATE_KEY, state);
     localStorage.setItem(STATE_KEY, state);
   } catch {
     /* ignorato */
   }
-  const p = new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, redirect_uri: redirectUri(), response_type: 'token', scope: SCOPE, include_granted_scopes: 'true', state });
+  const p = new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, redirect_uri: redirectUri(), response_type: 'token', scope: `${DRIVE_SCOPE} ${CALENDAR_SCOPE}`, include_granted_scopes: 'true', state });
   location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${p}`);
 }
 
@@ -74,7 +93,7 @@ export function takeAuthResult(): AuthReturn {
   return r;
 }
 
-export type AuthReturn = { kind: 'none' } | { kind: 'ok' } | { kind: 'error'; message: string };
+export type AuthReturn = { kind: 'none' } | { kind: 'ok'; intent: AuthIntent } | { kind: 'error'; message: string };
 
 /** Legge l'esito dell'accesso dall'indirizzo (#access_token=...) e lo ripulisce subito. */
 export function consumeAuthRedirect(): AuthReturn {
@@ -102,17 +121,25 @@ function parseAuthRedirect(): AuthReturn {
   const token = p.get('access_token');
   const expiresIn = Number(p.get('expires_in') ?? '3600');
   if (!token) return { kind: 'error', message: 'Accesso a Google non riuscito.' };
-  write({ ...read(), token, expiresAt: Date.now() + expiresIn * 1000 });
-  return { kind: 'ok' };
+  write({ ...read(), token, expiresAt: Date.now() + expiresIn * 1000, scope: p.get('scope') ?? '' });
+  let intent: AuthIntent = 'drive';
+  try {
+    const v = localStorage.getItem(INTENT_KEY);
+    if (v === 'calendar' || v === 'reconnect') intent = v;
+    localStorage.removeItem(INTENT_KEY);
+  } catch {
+    /* ignorato */
+  }
+  return { kind: 'ok', intent };
 }
 
-async function api(token: string, url: string, init: RequestInit = {}): Promise<Response> {
+export async function api(token: string, url: string, init: RequestInit = {}): Promise<Response> {
   const r = await fetch(url, { ...init, headers: { ...(init.headers ?? {}), Authorization: `Bearer ${token}` } });
   if (r.status === 401) {
     forgetDriveToken();
     throw new DriveAuthError('Accesso a Google scaduto');
   }
-  if (!r.ok) throw new Error(`Google Drive ha risposto ${r.status}`);
+  if (!r.ok) throw new GoogleApiError(r.status);
   return r;
 }
 

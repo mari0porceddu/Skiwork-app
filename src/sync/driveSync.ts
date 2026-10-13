@@ -4,7 +4,9 @@ import { setSetting } from '../db/repo';
 import { backupNudge } from '../domain/backupNudge';
 import { backupRecords } from '../ui/backupActions';
 import type { AppData } from '../ui/data';
-import { downloadBackup, driveAvailable, driveToken, uploadBackup } from './drive';
+import { needsPush } from '../domain/gcal';
+import { syncCalendar } from './calendar';
+import { CALENDAR_SCOPE, downloadBackup, driveAvailable, driveToken, grantedScope, uploadBackup } from './drive';
 
 /** Recupera i dati da Drive aggiungendoli a quelli locali (non cancella nulla). */
 export async function recoverFromDrive(token: string): Promise<MergeReport | null> {
@@ -58,6 +60,41 @@ export function useDriveAutoSync(data: AppData | undefined): void {
         .catch(() => undefined) // riprova alla prossima modifica, al ritorno della rete o all'apertura
         .finally(() => (running = false));
     }, 4000);
+    return () => clearTimeout(t);
+  }, [data, tick]);
+}
+
+let calendarRunning = false;
+let lastCalendarRun = 0;
+const CALENDAR_PULL_EVERY = 2 * 60_000;
+
+/** Calendario Google: all'apertura, al ritorno nell'app e dopo ogni modifica alle attività. */
+export function useCalendarAutoSync(data: AppData | undefined): void {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setTick((t) => t + 1);
+    const vis = () => document.visibilityState === 'visible' && bump();
+    window.addEventListener('online', bump);
+    document.addEventListener('visibilitychange', vis);
+    return () => {
+      window.removeEventListener('online', bump);
+      document.removeEventListener('visibilitychange', vis);
+    };
+  }, []);
+  useEffect(() => {
+    if (!data || !data.settings.calendarSync || !driveAvailable() || !navigator.onLine || !grantedScope(CALENDAR_SCOPE)) return;
+    const localChanges = data.settings.gcalPendingDeletes.length > 0 || data.activities.some(needsPush);
+    if (!localChanges && Date.now() - lastCalendarRun < CALENDAR_PULL_EVERY) return;
+    const token = driveToken();
+    if (!token) return;
+    const t = setTimeout(() => {
+      if (calendarRunning) return;
+      calendarRunning = true;
+      lastCalendarRun = Date.now();
+      syncCalendar(token)
+        .catch(() => undefined)
+        .finally(() => (calendarRunning = false));
+    }, 3000);
     return () => clearTimeout(t);
   }, [data, tick]);
 }

@@ -11,8 +11,9 @@ async function start() {
   try {
     await db.open();
     await ensureSeed();
-    // Ritorno dalla pagina di accesso Google: attiva il salvataggio su Drive su questo dispositivo.
-    if (consumeAuthRedirect().kind === 'ok') await setSetting('driveSync', true);
+    // Ritorno dalla pagina di accesso Google: attiva Drive o Calendar su questo dispositivo.
+    const auth = consumeAuthRedirect();
+    if (auth.kind === 'ok' && auth.intent !== 'reconnect') await setSetting(auth.intent === 'calendar' ? 'calendarSync' : 'driveSync', true);
     // Chiede al browser di non eliminare automaticamente i dati (best effort).
     void navigator.storage?.persist?.();
   } catch (e) {

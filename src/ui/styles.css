@@ -600,6 +600,7 @@ input[type='color'] {
   color: var(--warning);
   border-color: currentColor;
 }
+.badge.needs-details,
 .badge.cancelled,
 .badge.doc-overdue {
   color: var(--danger);

@@ -37,6 +37,10 @@ export interface AppSettings {
   /** Salvataggio automatico su Google Drive attivo su questo dispositivo. */
   driveSync: boolean;
   driveLastSyncAt: string | null;
+  /** Sincronizzazione con il calendario Google "SkiWork" attiva su questo dispositivo. */
+  calendarSync: boolean;
+  calendarLastSyncAt: string | null;
+  gcalPendingDeletes: string[];
   /** Inizio e fine stagione (MM-DD), configurabili. */
   seasonStart: string;
   seasonEnd: string;
@@ -57,6 +61,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lastBackupAt: null,
   driveSync: false,
   driveLastSyncAt: null,
+  calendarSync: false,
+  calendarLastSyncAt: null,
+  gcalPendingDeletes: [],
   seasonStart: '11-01',
   seasonEnd: '04-30',
   fiscalProfile: {},

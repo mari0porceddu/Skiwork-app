@@ -26,7 +26,7 @@ describe('accesso Google Drive', () => {
     const d = await drive();
     sessionStorage.setItem('skiwork.drive.state', 'abc');
     hash = '#access_token=tok&expires_in=3600&state=abc&token_type=Bearer';
-    expect(d.consumeAuthRedirect()).toEqual({ kind: 'ok' });
+    expect(d.consumeAuthRedirect()).toEqual({ kind: 'ok', intent: 'drive' });
     expect(hash).toBe('#/impostazioni');
     expect(d.driveToken()).toBe('tok');
 

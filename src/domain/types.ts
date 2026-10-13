@@ -171,6 +171,14 @@ export interface Activity {
   shift?: ShiftKey;
   /** Livello degli allievi (facoltativo). */
   level?: LessonLevel;
+  /** Evento collegato nel calendario Google "SkiWork". */
+  gcalEventId?: string;
+  /** updatedAt dell'attività all'ultimo invio a Google Calendar. */
+  gcalSyncedAt?: string;
+  /** Campo "updated" dell'evento Google all'ultima sincronizzazione. */
+  gcalUpdated?: string;
+  /** Creata da Google Calendar: mancano committente, tipologia e compenso. */
+  needsDetails?: boolean;
   /** UID esterno (es. importazione ICS) per evitare duplicati. Mai null: assente se non presente. */
   externalUid?: string;
   createdAt: string;

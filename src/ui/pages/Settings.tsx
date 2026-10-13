@@ -22,8 +22,9 @@ import { db } from '../../db/db';
 import { mergeBackup, parseBackupText, restoreBackup } from '../../db/backup';
 import { deleteRecord, importIcsEvents, saveClientAndRealignShifts, saveRecord, setSetting } from '../../db/repo';
 import { createBackupFile } from '../backupActions';
-import { driveAvailable, driveToken, forgetDriveToken, startDriveAuth, takeAuthResult } from '../../sync/drive';
+import { CALENDAR_SCOPE, driveAvailable, driveToken, forgetDriveToken, grantedScope, startDriveAuth, takeAuthResult } from '../../sync/drive';
 import { recoverFromDrive, syncToDrive } from '../../sync/driveSync';
+import { syncCalendar } from '../../sync/calendar';
 import { SHIFT_KEYS, SHIFT_LABEL, shiftTimes } from '../../domain/shifts';
 import { EmptyState, Field, MoneyInput, Segmented } from '../components/fields';
 import { Sheet } from '../components/Sheet';
@@ -253,6 +254,7 @@ export function Settings() {
           )}
         </p>
         {driveAvailable() && <DriveSection />}
+        {driveAvailable() && <CalendarSection />}
         <p className="muted">“Ripristina” sostituisce tutti i dati con quelli del file. “Aggiungi dati” invece unisce il file ai dati attuali senza cancellare nulla: le attività già presenti vengono ignorate e i committenti con lo stesso nome vengono riconosciuti.</p>
         <div className="btn-group wrap">
           <button className="btn primary" onClick={doBackup}>
@@ -603,7 +605,7 @@ function DriveSection() {
   const token = driveToken();
   useEffect(() => {
     const r = takeAuthResult();
-    if (r.kind === 'ok') toast('Google Drive collegato: salvataggio automatico attivo');
+    if (r.kind === 'ok') toast(r.intent === 'calendar' ? 'Google Calendar collegato: sincronizzazione attiva' : r.intent === 'drive' ? 'Google Drive collegato: salvataggio automatico attivo' : 'Accesso Google rinnovato');
     if (r.kind === 'error') toast(r.message, 'error');
   }, [toast]);
   async function run(fn: () => Promise<void>) {
@@ -622,7 +624,7 @@ function DriveSection() {
       {!s.driveSync ? (
         <>
           <p className="muted">Salva da solo una copia dei dati nel tuo Google Drive, in una cartella riservata all’app. Così i dati restano anche se cancelli l’app o cambi telefono: basta ricollegare lo stesso account. <a href="./privacy.html">Privacy</a></p>
-          <button className="btn primary" onClick={startDriveAuth}>
+          <button className="btn primary" onClick={() => startDriveAuth('drive')}>
             Collega Google Drive
           </button>
         </>
@@ -649,7 +651,7 @@ function DriveSection() {
                 </button>
               </>
             ) : (
-              <button className="btn primary" onClick={startDriveAuth}>
+              <button className="btn primary" onClick={() => startDriveAuth('reconnect')}>
                 Riconnetti
               </button>
             )}
@@ -659,6 +661,63 @@ function DriveSection() {
               await setSetting('driveLastSyncAt', null);
               toast('Google Drive scollegato da questo dispositivo (la copia su Drive resta)');
             })}>
+              Scollega
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CalendarSection() {
+  const { data, toast } = useApp();
+  const [busy, setBusy] = useState(false);
+  const s = data.settings;
+  const token = driveToken();
+  const granted = grantedScope(CALENDAR_SCOPE);
+  async function syncNow() {
+    if (!token) return startDriveAuth('reconnect');
+    setBusy(true);
+    try {
+      const r = await syncCalendar(token);
+      toast(`Calendario sincronizzato: ${r.sent} inviate, ${r.created} nuove da Google, ${r.updated} aggiornate`);
+    } catch (e) {
+      toast(`Google Calendar: ${(e as Error).message}`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="drive-box">
+      <h3>Google Calendar</h3>
+      {!s.calendarSync ? (
+        <>
+          <p className="muted">Crea nel tuo Google Calendar un calendario “SkiWork”: le attività dell’app compaiono lì, e gli eventi che aggiungi in quel calendario arrivano in SkiWork come attività da completare. L’app non vede gli altri tuoi calendari.</p>
+          <button className="btn primary" onClick={() => startDriveAuth('calendar')}>
+            Collega Google Calendar
+          </button>
+        </>
+      ) : (
+        <>
+          <p className={`alert ${token && granted ? 'info' : 'warning'}`}>
+            Ultima sincronizzazione: <strong>{s.calendarLastSyncAt ? `${formatDateShort(s.calendarLastSyncAt.slice(0, 10))} ${s.calendarLastSyncAt.slice(11, 16)} UTC` : 'mai'}</strong>.{' '}
+            {!token ? 'L’accesso Google è scaduto: tocca Sincronizza per riconnetterti.' : !granted ? 'Non hai concesso l’accesso al calendario: ricollega e spunta il permesso del calendario.' : 'Si sincronizza da solo all’apertura e dopo ogni modifica.'}
+          </p>
+          <div className="btn-group wrap">
+            {granted || !token ? (
+              <button className="btn primary" disabled={busy} onClick={syncNow}>
+                Sincronizza ora
+              </button>
+            ) : (
+              <button className="btn primary" onClick={() => startDriveAuth('calendar')}>
+                Ricollega
+              </button>
+            )}
+            <button className="btn ghost" disabled={busy} onClick={async () => {
+              await setSetting('calendarSync', false);
+              toast('Sincronizzazione con Google Calendar disattivata (il calendario su Google resta)');
+            }}>
               Scollega
             </button>
           </div>

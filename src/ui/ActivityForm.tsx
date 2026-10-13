@@ -129,6 +129,9 @@ export function ActivityForm({ req, onClose }: { req: ActivityFormRequest; onClo
           seriesId: editing?.seriesId,
           shift: work && shift ? shift : undefined,
           level: work && level ? level : undefined,
+          gcalEventId: editing?.gcalEventId,
+          gcalSyncedAt: editing?.gcalSyncedAt,
+          gcalUpdated: editing?.gcalUpdated,
           externalUid: editing?.externalUid,
           createdAt: editing?.createdAt ?? '',
           updatedAt: editing?.updatedAt ?? '',
@@ -296,6 +299,9 @@ export function ActivityForm({ req, onClose }: { req: ActivityFormRequest; onClo
           void onSave();
         }}
       >
+        {editing?.needsDetails && (
+          <p className="alert warning">Evento aggiunto su Google Calendar: scegli tipologia e committente e controlla il compenso, poi salva.</p>
+        )}
         <Field label="Tipologia">
           {(id) => (
             <select id={id} value={type} onChange={(e) => setType(e.target.value as ActivityType)}>

@@ -21,7 +21,7 @@ export function ActivityRow({ a, client, onOpen, showDate = false }: { a: Activi
         </span>
       </span>
       <span className="ar-right">
-        <span className={`badge ${a.status}`}>{ACTIVITY_STATUS_LABEL[a.status]}</span>
+        {a.needsDetails ? <span className="badge needs-details">Da completare</span> : <span className={`badge ${a.status}`}>{ACTIVITY_STATUS_LABEL[a.status]}</span>}
         {isWorkType(a.type) && (a.rate || amount !== 0) && (
           <span className={`ar-amount ${a.status === 'completed' ? '' : 'muted'}`} title={a.status === 'completed' ? 'Maturato' : 'Previsto'}>
             {formatEuro(amount)}

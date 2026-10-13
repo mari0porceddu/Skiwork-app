@@ -74,6 +74,7 @@ export async function saveActivity(activity: Activity, reason = ''): Promise<Act
     if (next.seriesId === undefined) delete next.seriesId;
     if (next.shift === undefined) delete next.shift;
     if (next.level === undefined) delete next.level;
+    if (!next.needsDetails) delete next.needsDetails;
     await db.activities.put(next);
     const changes = diff(before, next);
     if (!before) await audit('activities', next.id, 'create', changes, reason);
@@ -107,11 +108,16 @@ export async function createActivitySeries(template: Activity, dates: string[]):
 }
 
 export async function deleteActivity(id: ID, reason = ''): Promise<void> {
-  await db.transaction('rw', db.activities, db.audit, db.ledger, async () => {
+  await db.transaction('rw', db.activities, db.audit, db.ledger, db.settings, async () => {
     const before = await db.activities.get(id);
     if (!before) return;
     if (before.status === 'completed' && reason.trim() === '') throw new ReasonRequiredError();
     await db.activities.delete(id);
+    // l'evento collegato su Google Calendar verrà rimosso alla prossima sincronizzazione
+    if (before.gcalEventId) {
+      const pending = ((await db.settings.get('gcalPendingDeletes'))?.value as string[] | undefined) ?? [];
+      await db.settings.put({ key: 'gcalPendingDeletes', value: [...pending, before.gcalEventId] });
+    }
     // le voci collegate (rimborsi) restano ma perdono il collegamento
     await db.ledger.where('activityId').equals(id).modify({ activityId: null });
     await audit('activities', id, 'delete', diff(before, {}, Object.keys(before)), reason);
