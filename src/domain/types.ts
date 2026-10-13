@@ -62,6 +62,17 @@ export function isWorkType(t: ActivityType): boolean {
   return t !== 'personal';
 }
 
+export type LessonLevel = 'beginner' | 'intermediate' | 'advanced' | 'expert';
+
+export const LESSON_LEVEL_LABEL: Record<LessonLevel, string> = {
+  beginner: 'Principiante',
+  intermediate: 'Intermedio',
+  advanced: 'Avanzato',
+  expert: 'Esperto',
+};
+
+export const LESSON_LEVELS = Object.keys(LESSON_LEVEL_LABEL) as LessonLevel[];
+
 export type ActivityStatus = 'planned' | 'confirmed' | 'completed' | 'cancelled';
 
 export const ACTIVITY_STATUS_LABEL: Record<ActivityStatus, string> = {
@@ -158,6 +169,8 @@ export interface Activity {
   seriesId?: ID;
   /** Turno (mattina, pomeriggio, giornata intera): gli orari seguono quelli del committente. */
   shift?: ShiftKey;
+  /** Livello degli allievi (facoltativo). */
+  level?: LessonLevel;
   /** UID esterno (es. importazione ICS) per evitare duplicati. Mai null: assente se non presente. */
   externalUid?: string;
   createdAt: string;

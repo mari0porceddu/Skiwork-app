@@ -450,6 +450,10 @@ input[type='color'] {
   font-variant-numeric: tabular-nums;
   margin: 2px;
 }
+.chips > .muted {
+  align-self: center;
+  margin-right: 4px;
+}
 .chip.active {
   background: var(--primary);
   color: var(--primary-text);

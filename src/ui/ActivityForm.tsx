@@ -9,8 +9,11 @@ import {
   ACTIVITY_STATUS_LABEL,
   ACTIVITY_TYPE_LABEL,
   ACTIVITY_TYPES,
+  LESSON_LEVEL_LABEL,
+  LESSON_LEVELS,
   RATE_MODE_LABEL,
   isWorkType,
+  type LessonLevel,
   type Activity,
   type ActivityStatus,
   type ActivityType,
@@ -42,6 +45,7 @@ export function ActivityForm({ req, onClose }: { req: ActivityFormRequest; onClo
   const [start, setStart] = useState(editing?.start ?? req.start ?? s.usualStart);
   const [end, setEnd] = useState(editing?.end ?? req.end ?? s.usualEnd);
   const [shift, setShift] = useState<ShiftKey | null>(editing?.shift ?? null);
+  const [level, setLevel] = useState<LessonLevel | null>(editing?.level ?? null);
   const [statusTouched, setStatusTouched] = useState(!!editing);
   const [status, setStatusRaw] = useState<ActivityStatus>(editing?.status ?? defaultStatus(date, end, start));
 
@@ -124,6 +128,7 @@ export function ActivityForm({ req, onClose }: { req: ActivityFormRequest; onClo
           reminderMinutesBefore: reminder.trim() === '' ? null : Math.max(0, parseInt(reminder, 10) || 0),
           seriesId: editing?.seriesId,
           shift: work && shift ? shift : undefined,
+          level: work && level ? level : undefined,
           externalUid: editing?.externalUid,
           createdAt: editing?.createdAt ?? '',
           updatedAt: editing?.updatedAt ?? '',
@@ -393,6 +398,16 @@ export function ActivityForm({ req, onClose }: { req: ActivityFormRequest; onClo
           </Field>
         </div>
 
+        {work && (
+          <div className="chips" role="group" aria-label="Livello">
+            <span className="muted">Livello</span>
+            {LESSON_LEVELS.map((l) => (
+              <button key={l} type="button" className={`chip${level === l ? ' active' : ''}`} aria-pressed={level === l} onClick={() => setLevel(level === l ? null : l)}>
+                {LESSON_LEVEL_LABEL[l]}
+              </button>
+            ))}
+          </div>
+        )}
         {work && (
           <Field label="Tariffa applicabile" error={errors.rate} hint={rateChoice === 'auto' && applicable ? 'Tariffa configurata per committente, tipologia e data' : rateChoice === 'auto' ? 'Nessuna tariffa configurata: inseriscila manualmente' : undefined}>
             {(id) => (

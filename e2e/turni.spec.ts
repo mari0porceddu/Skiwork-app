@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('turni del committente: orari da impostazioni e scelta rapida nell’attività', async ({ page }) => {
+test('turni e livello: orari da impostazioni, scelta rapida e livello nell’attività', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/#/impostazioni');
@@ -23,8 +23,12 @@ test('turni del committente: orari da impostazioni e scelta rapida nell’attivi
   await expect(dlg.getByLabel('Fine', { exact: true })).toHaveValue('16:30');
   await dlg.getByLabel('Data', { exact: true }).fill('2026-12-05');
   await dlg.getByLabel('Tariffa applicabile', { exact: true }).selectOption('none');
+  await dlg.getByRole('button', { name: 'Principiante' }).click();
   await dlg.getByRole('button', { name: 'Salva' }).click();
   await expect(page.getByText('Attività salvata').last()).toBeVisible();
+
+  await page.goto('/#/attivita');
+  await expect(page.locator('.activity-row').first()).toContainText('Pomeriggio · Principiante');
 
   // Cambio orario del pomeriggio: l'attività pianificata si aggiorna
   await page.goto('/#/impostazioni');

@@ -27,7 +27,7 @@ Dettagli e limiti di iOS: [docs/IOS.md](docs/IOS.md).
 
 ## Dati e backup
 
-I dati sono nel database del browser (IndexedDB) **solo su quel dispositivo**. Si possono perdere se cancelli i dati del sito o rimuovi l'app. Fai regolarmente **Impostazioni → Scarica backup completo** e conserva il file (es. su iCloud Drive). Il ripristino sostituisce tutti i dati dopo una validazione completa del file e una conferma.
+I dati sono nel database del browser (IndexedDB) **solo su quel dispositivo**. Si possono perdere se cancelli i dati del sito o rimuovi l'app. Fai regolarmente **Impostazioni → Scarica backup completo** e conserva il file (es. su iCloud Drive). Il ripristino sostituisce tutti i dati dopo una validazione completa del file e una conferma. **Aggiungi dati da file** invece unisce un backup ai dati attuali senza cancellare nulla: ignora i record e le attività già presenti (stessa data, orari, committente, tipologia e titolo) e riconosce i committenti con lo stesso nome.
 
 Telefono e computer hanno database separati: la sincronizzazione è un'estensione futura. Per ora si passa da un dispositivo all'altro con backup e ripristino.
 

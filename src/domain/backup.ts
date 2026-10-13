@@ -73,6 +73,7 @@ export const activitySchema = z.object({
   reminderMinutesBefore: z.number().int().min(0).nullable(),
   seriesId: id.optional(),
   shift: z.enum(['morning', 'afternoon', 'full_day']).optional(),
+  level: z.enum(['beginner', 'intermediate', 'advanced', 'expert']).optional(),
   externalUid: z.string().optional(),
   createdAt: stamp,
   updatedAt: stamp,

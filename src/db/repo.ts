@@ -73,6 +73,7 @@ export async function saveActivity(activity: Activity, reason = ''): Promise<Act
     if (next.externalUid === undefined || next.externalUid === '') delete next.externalUid;
     if (next.seriesId === undefined) delete next.seriesId;
     if (next.shift === undefined) delete next.shift;
+    if (next.level === undefined) delete next.level;
     await db.activities.put(next);
     const changes = diff(before, next);
     if (!before) await audit('activities', next.id, 'create', changes, reason);

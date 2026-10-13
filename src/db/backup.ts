@@ -1,5 +1,6 @@
 import { BACKUP_APP, BACKUP_FORMAT_VERSION, validateBackup, type BackupFile, type ValidationResult } from '../domain/backup';
 import { newId } from '../domain/ids';
+import { planMerge } from '../domain/merge';
 import type { StoredFile } from '../domain/types';
 import { db, DB_VERSION } from './db';
 
@@ -89,6 +90,55 @@ export async function restoreBackup(backup: BackupFile): Promise<void> {
     await db.fiscalParams.bulkAdd(t.fiscalParams);
     await db.fiscalDeadlines.bulkAdd(t.fiscalDeadlines);
     await db.audit.add({ id: newId(), entity: 'database', entityId: 'all', action: 'restore', changes: { exportedAt: { from: null, to: backup.exportedAt } }, reason: 'Ripristino da backup', at: new Date().toISOString() });
+  });
+}
+
+export interface MergeReport {
+  activities: number;
+  clients: number;
+  other: number;
+  matchedClients: number;
+  skippedDuplicates: number;
+}
+
+/**
+ * Importazione che AGGIUNGE i dati del file a quelli attuali senza modificare né cancellare
+ * nulla di esistente (eccetto i turni aggiunti a un committente che non ne aveva).
+ * Un'unica transazione: se qualcosa fallisce non viene modificato nulla.
+ */
+export async function mergeBackup(backup: BackupFile): Promise<MergeReport> {
+  const tables = [db.clients, db.rates, db.activities, db.availability, db.ledger, db.documents, db.payments, db.goals, db.audit, db.files, db.fiscalParams, db.fiscalDeadlines];
+  return db.transaction('rw', tables, async () => {
+    const plan = planMerge(backup.tables, {
+      clients: await db.clients.toArray(),
+      rates: await db.rates.toArray(),
+      activities: await db.activities.toArray(),
+      availability: await db.availability.toArray(),
+      ledger: await db.ledger.toArray(),
+      documents: await db.documents.toArray(),
+      payments: await db.payments.toArray(),
+      goals: await db.goals.toArray(),
+      fiscalParams: await db.fiscalParams.toArray(),
+      fiscalDeadlines: await db.fiscalDeadlines.toArray(),
+      files: await db.files.toCollection().primaryKeys().then((ids) => ids.map((id) => ({ id: String(id) }))),
+    });
+    const a = plan.add;
+    await db.clients.bulkAdd(a.clients);
+    await db.clients.bulkPut(plan.updateClients.map((c) => ({ ...c, updatedAt: new Date().toISOString() })));
+    await db.rates.bulkAdd(a.rates);
+    await db.activities.bulkAdd(a.activities.map((x) => { const y = { ...x }; if (!y.externalUid) delete y.externalUid; if (!y.seriesId) delete y.seriesId; return y; }));
+    await db.availability.bulkAdd(a.availability);
+    await db.ledger.bulkAdd(a.ledger);
+    await db.documents.bulkAdd(a.documents);
+    await db.payments.bulkAdd(a.payments);
+    await db.goals.bulkAdd(a.goals);
+    await db.files.bulkAdd(a.files.map((f) => ({ id: f.id, name: f.name, type: f.type, size: f.size, createdAt: f.createdAt, blob: dataUrlToBlob(f.dataUrl) })));
+    await db.fiscalParams.bulkAdd(a.fiscalParams);
+    await db.fiscalDeadlines.bulkAdd(a.fiscalDeadlines);
+    const other = a.rates.length + a.availability.length + a.ledger.length + a.documents.length + a.payments.length + a.goals.length + a.files.length + a.fiscalParams.length + a.fiscalDeadlines.length;
+    const report: MergeReport = { activities: a.activities.length, clients: a.clients.length, other, matchedClients: plan.matchedClients, skippedDuplicates: plan.skippedDuplicates };
+    await db.audit.add({ id: newId(), entity: 'database', entityId: 'all', action: 'import', changes: { added: { to: report } }, reason: `Aggiunta dati da backup del ${backup.exportedAt}`, at: new Date().toISOString() });
+    return report;
   });
 }
 

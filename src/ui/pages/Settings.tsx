@@ -19,7 +19,7 @@ import {
   type RoundingMode,
 } from '../../domain/types';
 import { db } from '../../db/db';
-import { exportBackup, parseBackupText, restoreBackup } from '../../db/backup';
+import { exportBackup, mergeBackup, parseBackupText, restoreBackup } from '../../db/backup';
 import { deleteRecord, importIcsEvents, saveClientAndRealignShifts, saveRecord, setSetting } from '../../db/repo';
 import { SHIFT_KEYS, SHIFT_LABEL, shiftTimes } from '../../domain/shifts';
 import { EmptyState, Field, MoneyInput, Segmented } from '../components/fields';
@@ -69,6 +69,24 @@ export function Settings() {
       toast('Backup ripristinato');
     } catch (e) {
       toast(`Ripristino non riuscito, nessun dato modificato: ${(e as Error).message}`, 'error');
+    }
+  }
+
+  async function doMerge(file: File) {
+    const v = parseBackupText(await file.text());
+    if (!v.ok || !v.data) {
+      toast(`File non valido: ${v.errors.slice(0, 3).join('; ')}`, 'error');
+      return;
+    }
+    try {
+      const r = await mergeBackup(v.data);
+      const parts = [`${r.activities} attività aggiunte`];
+      if (r.clients) parts.push(`${r.clients} committenti nuovi`);
+      if (r.other) parts.push(`${r.other} altri elementi`);
+      if (r.skippedDuplicates) parts.push(`${r.skippedDuplicates} già presenti ignorate`);
+      toast(parts.join(', '));
+    } catch (e) {
+      toast(`Importazione non riuscita, nessun dato modificato: ${(e as Error).message}`, 'error');
     }
   }
 
@@ -233,6 +251,7 @@ export function Settings() {
             </button>
           )}
         </p>
+        <p className="muted">“Ripristina” sostituisce tutti i dati con quelli del file. “Aggiungi dati” invece unisce il file ai dati attuali senza cancellare nulla: le attività già presenti vengono ignorate e i committenti con lo stesso nome vengono riconosciuti.</p>
         <div className="btn-group wrap">
           <button className="btn primary" onClick={doBackup}>
             Scarica backup completo (JSON)
@@ -240,6 +259,10 @@ export function Settings() {
           <label className="btn">
             Ripristina da backup…
             <input type="file" accept="application/json,.json" hidden onChange={(e) => e.target.files?.[0] && doRestore(e.target.files[0]).finally(() => (e.target.value = ''))} />
+          </label>
+          <label className="btn">
+            Aggiungi dati da file…
+            <input type="file" accept="application/json,.json" hidden onChange={(e) => e.target.files?.[0] && doMerge(e.target.files[0]).finally(() => (e.target.value = ''))} />
           </label>
           <button
             className="btn"
