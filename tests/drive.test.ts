@@ -62,6 +62,32 @@ describe('accesso Google Drive', () => {
   });
 });
 
+describe('rinnovo automatico dell’accesso', () => {
+  it('rinnova da solo solo se attivo, scaduto, online e non tentato di recente', async () => {
+    const d = await drive();
+    vi.stubGlobal('navigator', { onLine: true });
+    hash = '#/calendario';
+    expect(d.trySilentReconnect(false)).toBe(false);
+    expect(d.trySilentReconnect(true)).toBe(true);
+    expect(String((location.assign as ReturnType<typeof vi.fn>).mock.calls[0]?.[0])).toContain('prompt=none');
+    expect(d.trySilentReconnect(true)).toBe(false); // appena tentato
+
+    // Google non può rinnovare senza l’utente: nessun errore mostrato, si torna dov’eri, niente nuovi tentativi per ore
+    hash = `#error=interaction_required&state=${localStorage.getItem('skiwork.drive.state')}`;
+    expect(d.consumeAuthRedirect()).toEqual({ kind: 'silent-failed' });
+    expect(hash).toBe('#/calendario');
+    expect(d.trySilentReconnect(true, Date.now() + 20 * 60_000)).toBe(false);
+    expect(d.trySilentReconnect(true, Date.now() + 7 * 3_600_000)).toBe(true);
+  });
+
+  it('con un token valido non fa nulla', async () => {
+    const d = await drive();
+    vi.stubGlobal('navigator', { onLine: true });
+    localStorage.setItem('skiwork.drive', JSON.stringify({ token: 't', expiresAt: Date.now() + 3600_000 }));
+    expect(d.trySilentReconnect(true)).toBe(false);
+  });
+});
+
 describe('sincronizzazione', () => {
   it('alla prima sincronizzazione su un dispositivo recupera la copia su Drive prima di sovrascriverla', async () => {
     const D = await import('../src/db/db');

@@ -14,6 +14,7 @@ import { Fiscal } from './pages/Fiscal';
 import { href, useRoute, type RouteName } from './router';
 import { useApp } from './context';
 import { useCalendarAutoSync, useDriveAutoSync } from '../sync/driveSync';
+import { trySilentReconnect } from '../sync/drive';
 
 const NAV: { name: RouteName; label: string; icon: string; primary: boolean }[] = [
   { name: 'dashboard', label: 'Home', icon: '⌂', primary: true },
@@ -53,6 +54,13 @@ function Shell() {
   const { openActivity, data } = useApp();
   useDriveAutoSync(data);
   useCalendarAutoSync(data);
+  // Tornando nell'app dopo più di un'ora l'accesso Google è scaduto: lo rinnova da solo.
+  const googleOn = data.settings.driveSync || data.settings.calendarSync;
+  useEffect(() => {
+    const onVisible = () => document.visibilityState === 'visible' && trySilentReconnect(googleOn);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [googleOn]);
   const secondaryActive = NAV.some((n) => !n.primary && n.name === route.name);
   return (
     <div className="shell">

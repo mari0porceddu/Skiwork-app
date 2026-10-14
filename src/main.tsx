@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { db } from './db/db';
 import { ensureSeed, setSetting } from './db/repo';
-import { consumeAuthRedirect } from './sync/drive';
+import { consumeAuthRedirect, trySilentReconnect } from './sync/drive';
 import { App } from './ui/App';
 import './ui/styles.css';
 
@@ -14,6 +14,11 @@ async function start() {
     // Ritorno dalla pagina di accesso Google: attiva Drive o Calendar su questo dispositivo.
     const auth = consumeAuthRedirect();
     if (auth.kind === 'ok' && auth.intent !== 'reconnect') await setSetting(auth.intent === 'calendar' ? 'calendarSync' : 'driveSync', true);
+    // Accesso Google scaduto: lo rinnova da solo all'apertura (la pagina va da Google e torna subito).
+    if (auth.kind === 'none') {
+      const on = async (k: string) => (await db.settings.get(k))?.value === true;
+      if (trySilentReconnect((await on('driveSync')) || (await on('calendarSync')))) return;
+    }
     // Chiede al browser di non eliminare automaticamente i dati (best effort).
     void navigator.storage?.persist?.();
   } catch (e) {

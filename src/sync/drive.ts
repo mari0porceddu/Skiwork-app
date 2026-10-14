@@ -72,17 +72,49 @@ export function redirectUri(): string {
 export type AuthIntent = 'drive' | 'calendar' | 'reconnect';
 const INTENT_KEY = 'skiwork.google.intent';
 
-export function startDriveAuth(intent: AuthIntent = 'drive'): void {
+export function startDriveAuth(intent: AuthIntent = 'drive', opts: { silent?: boolean } = {}): void {
   const state = crypto.randomUUID();
   try {
     localStorage.setItem(INTENT_KEY, intent);
     sessionStorage.setItem(STATE_KEY, state);
     localStorage.setItem(STATE_KEY, state);
+    localStorage.setItem(RETURN_KEY, location.hash || '#/');
+    if (opts.silent) localStorage.setItem(SILENT_KEY, '1');
+    else localStorage.removeItem(SILENT_KEY);
   } catch {
     /* ignorato */
   }
   const p = new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, redirect_uri: redirectUri(), response_type: 'token', scope: `${DRIVE_SCOPE} ${CALENDAR_SCOPE}`, include_granted_scopes: 'true', state });
+  // prompt=none: se l'account Google è già collegato, Google rimanda subito indietro senza chiedere nulla.
+  if (opts.silent) p.set('prompt', 'none');
   location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${p}`);
+}
+
+const RETURN_KEY = 'skiwork.google.return';
+const SILENT_KEY = 'skiwork.google.silent';
+const SILENT_TRY_KEY = 'skiwork.google.silentTry';
+const SILENT_FAIL_KEY = 'skiwork.google.silentFail';
+const SILENT_RETRY_MS = 10 * 60_000;
+const SILENT_AFTER_FAIL_MS = 6 * 3_600_000;
+
+/**
+ * Rinnova da solo l'accesso Google scaduto (dura un'ora), senza chiedere nulla all'utente:
+ * un passaggio lampo dalla pagina di Google, che rimanda subito all'app.
+ * Non lo fa senza rete, con una finestra aperta (dati non salvati), o se è fallito di recente.
+ */
+export function trySilentReconnect(enabled: boolean, now = Date.now()): boolean {
+  if (!enabled || !driveAvailable() || driveToken(now) || !navigator.onLine) return false;
+  if (typeof document !== 'undefined' && document.querySelector('dialog[open]')) return false;
+  try {
+    const lastTry = Number(localStorage.getItem(SILENT_TRY_KEY) ?? '0');
+    const lastFail = Number(localStorage.getItem(SILENT_FAIL_KEY) ?? '0');
+    if (now - lastTry < SILENT_RETRY_MS || now - lastFail < SILENT_AFTER_FAIL_MS) return false;
+    localStorage.setItem(SILENT_TRY_KEY, String(now));
+  } catch {
+    return false;
+  }
+  startDriveAuth('reconnect', { silent: true });
+  return true;
 }
 
 /** Esito dell'ultimo ritorno dalla pagina di accesso, mostrato una volta dalle Impostazioni. */
@@ -93,7 +125,7 @@ export function takeAuthResult(): AuthReturn {
   return r;
 }
 
-export type AuthReturn = { kind: 'none' } | { kind: 'ok'; intent: AuthIntent } | { kind: 'error'; message: string };
+export type AuthReturn = { kind: 'none' } | { kind: 'ok'; intent: AuthIntent } | { kind: 'error'; message: string } | { kind: 'silent-failed' };
 
 /** Legge l'esito dell'accesso dall'indirizzo (#access_token=...) e lo ripulisce subito. */
 export function consumeAuthRedirect(): AuthReturn {
@@ -105,18 +137,30 @@ function parseAuthRedirect(): AuthReturn {
   const h = location.hash.replace(/^#/, '');
   if (!/(^|&)(access_token|error)=/.test(h)) return { kind: 'none' };
   const p = new URLSearchParams(h);
-  history.replaceState(null, '', location.pathname + location.search + '#/impostazioni');
-  window.dispatchEvent(new HashChangeEvent('hashchange'));
   let expected: string | null = null;
+  let back = '#/impostazioni';
+  let silent = false;
   try {
     expected = sessionStorage.getItem(STATE_KEY) ?? localStorage.getItem(STATE_KEY);
+    silent = localStorage.getItem(SILENT_KEY) === '1';
+    back = localStorage.getItem(RETURN_KEY) ?? back;
+    for (const k of [STATE_KEY, SILENT_KEY, RETURN_KEY]) localStorage.removeItem(k);
     sessionStorage.removeItem(STATE_KEY);
-    localStorage.removeItem(STATE_KEY);
   } catch {
     /* ignorato */
   }
+  history.replaceState(null, '', location.pathname + location.search + (/access_token|error=/.test(back) ? '#/' : back));
+  window.dispatchEvent(new HashChangeEvent('hashchange'));
   if (!expected || p.get('state') !== expected) return { kind: 'error', message: 'Risposta di accesso non valida, riprova.' };
   const error = p.get('error');
+  if (error && silent) {
+    try {
+      localStorage.setItem(SILENT_FAIL_KEY, String(Date.now()));
+    } catch {
+      /* ignorato */
+    }
+    return { kind: 'silent-failed' };
+  }
   if (error) return { kind: 'error', message: error === 'access_denied' ? 'Accesso a Google annullato.' : `Accesso a Google non riuscito (${error}).` };
   const token = p.get('access_token');
   const expiresIn = Number(p.get('expires_in') ?? '3600');
