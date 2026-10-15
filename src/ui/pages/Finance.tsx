@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { csvAmount, toCsv } from '../../domain/csv';
 import { newId } from '../../domain/ids';
 import { formatEuro } from '../../domain/money';
-import { summarize, type Metric, type Period } from '../../domain/reports';
+import { buildPeriodReport, reportFilename } from '../../domain/pdfReport';
+import { splitByMonth, summarize, type Metric, type Period } from '../../domain/reports';
 import { addDays, endOfMonth, formatDateShort, formatMinutesAsHours, isValidDate, monthName, startOfMonth, startOfWeek, todayISO } from '../../domain/time';
 import { LEDGER_KIND_LABEL, type LedgerEntry, type LedgerKind } from '../../domain/types';
 import { deleteRecord, saveRecord } from '../../db/repo';
@@ -84,15 +85,25 @@ export function Finance() {
     void saveFile(`skiwork-finanze-${period.from}_${period.to}.csv`, toCsv(['Voce', 'Valore'], rows), 'text/csv');
   }
 
+  function exportPdf() {
+    const bytes = buildPeriodReport({ period, clientId: clientId || null, data, today });
+    void saveFile(reportFilename(period), new Blob([bytes as BlobPart], { type: 'application/pdf' }), 'application/pdf');
+  }
+
   const newEntry = (k: LedgerKind): LedgerEntry => ({ id: newId(), kind: k, clientId: clientId || null, activityId: null, date: today, amountCents: 0, description: '', createdAt: '', updatedAt: '' });
 
   return (
     <div className="page">
       <header className="page-header">
         <h1>Finanze</h1>
-        <button className="btn" onClick={exportCsv}>
-          Esporta CSV
-        </button>
+        <span className="btn-group">
+          <button className="btn" onClick={exportPdf}>
+            Report PDF
+          </button>
+          <button className="btn" onClick={exportCsv}>
+            CSV
+          </button>
+        </span>
       </header>
       <Segmented
         label="Periodo"
@@ -355,13 +366,7 @@ function LedgerEditor({ entry, onClose }: { entry: LedgerEntry; onClose: () => v
 /** Andamento mese per mese nel periodo (report mensile/stagionale). */
 function MonthlyTrend({ period, clientId }: { period: Period; clientId: string | null }) {
   const { data } = useApp();
-  const months: Period[] = [];
-  let m = startOfMonth(period.from);
-  while (m <= period.to && months.length < 36) {
-    months.push({ from: m < period.from ? period.from : m, to: endOfMonth(m) > period.to ? period.to : endOfMonth(m) });
-    m = addDays(endOfMonth(m), 1);
-  }
-  const rows = months.map((p) => ({ p, s: summarize({ ...p, clientId }, data) }));
+  const rows = splitByMonth(period).map((p) => ({ p, s: summarize({ ...p, clientId }, data) }));
   const max = Math.max(1, ...rows.map((r) => r.s.accruedCents.value));
   const label = (p: Period) => `${monthName(Number(p.from.slice(5, 7)) - 1).slice(0, 3)} ${p.from.slice(2, 4)}`;
   function exportCsv() {

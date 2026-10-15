@@ -5,7 +5,7 @@
 import { computeActivity } from './compensation';
 import { outstandingDocuments } from './documents';
 import { sumCents, type Cents } from './money';
-import type { ISODate } from './time';
+import { addDays, endOfMonth, startOfMonth, type ISODate } from './time';
 import type { Activity, ActivityType, LedgerEntry, Payment, WorkDocument } from './types';
 import { isWorkType } from './types';
 
@@ -140,4 +140,15 @@ export function accruedByDay(activities: Activity[], p: Period): Map<ISODate, Ce
 
 export function totalAccrued(activities: Activity[]): Cents {
   return sumCents(activities.map((a) => computeActivity(a).accruedCents));
+}
+
+/** Suddivide un periodo nei mesi di calendario che tocca (al massimo 36), tagliati sui suoi estremi. */
+export function splitByMonth(p: Period): Period[] {
+  const months: Period[] = [];
+  let m = startOfMonth(p.from);
+  while (m <= p.to && months.length < 36) {
+    months.push({ from: m < p.from ? p.from : m, to: endOfMonth(m) > p.to ? p.to : endOfMonth(m) });
+    m = addDays(endOfMonth(m), 1);
+  }
+  return months;
 }
