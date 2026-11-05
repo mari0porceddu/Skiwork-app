@@ -1,6 +1,6 @@
 import { BACKUP_APP, BACKUP_FORMAT_VERSION, validateBackup, type BackupFile, type ValidationResult } from '../domain/backup';
 import { newId } from '../domain/ids';
-import { planMerge } from '../domain/merge';
+import { mergeFiscalProfile, planMerge } from '../domain/merge';
 import type { StoredFile } from '../domain/types';
 import { db, DB_VERSION } from './db';
 
@@ -99,6 +99,8 @@ export interface MergeReport {
   other: number;
   matchedClients: number;
   skippedDuplicates: number;
+  /** Attività o committenti già presenti aggiornati con la versione più recente del file. */
+  updated: number;
 }
 
 /**
@@ -107,7 +109,7 @@ export interface MergeReport {
  * Un'unica transazione: se qualcosa fallisce non viene modificato nulla.
  */
 export async function mergeBackup(backup: BackupFile): Promise<MergeReport> {
-  const tables = [db.clients, db.rates, db.activities, db.availability, db.ledger, db.documents, db.payments, db.goals, db.audit, db.files, db.fiscalParams, db.fiscalDeadlines];
+  const tables = [db.settings, db.clients, db.rates, db.activities, db.availability, db.ledger, db.documents, db.payments, db.goals, db.audit, db.files, db.fiscalParams, db.fiscalDeadlines];
   return db.transaction('rw', tables, async () => {
     const plan = planMerge(backup.tables, {
       clients: await db.clients.toArray(),
@@ -124,7 +126,14 @@ export async function mergeBackup(backup: BackupFile): Promise<MergeReport> {
     });
     const a = plan.add;
     await db.clients.bulkAdd(a.clients);
-    await db.clients.bulkPut(plan.updateClients.map((c) => ({ ...c, updatedAt: new Date().toISOString() })));
+    await db.clients.bulkPut(plan.updateClients);
+    await db.activities.bulkPut(plan.updateActivities.map((x) => { const y = { ...x }; for (const k of ['externalUid', 'seriesId', 'gcalEventId', 'gcalSyncedAt', 'gcalUpdated', 'shift', 'level'] as const) if (y[k] === undefined) delete y[k]; if (!y.needsDetails) delete y.needsDetails; return y; }));
+    const incomingProfile = backup.tables.settings.find((s) => s.key === 'fiscalProfile')?.value;
+    if (incomingProfile) {
+      const current = ((await db.settings.get('fiscalProfile'))?.value ?? {}) as Parameters<typeof mergeFiscalProfile>[0];
+      const { profile, filled } = mergeFiscalProfile(current, incomingProfile);
+      if (filled) await db.settings.put({ key: 'fiscalProfile', value: profile });
+    }
     await db.rates.bulkAdd(a.rates);
     await db.activities.bulkAdd(a.activities.map((x) => { const y = { ...x }; if (!y.externalUid) delete y.externalUid; if (!y.seriesId) delete y.seriesId; return y; }));
     await db.availability.bulkAdd(a.availability);
@@ -136,7 +145,7 @@ export async function mergeBackup(backup: BackupFile): Promise<MergeReport> {
     await db.fiscalParams.bulkAdd(a.fiscalParams);
     await db.fiscalDeadlines.bulkAdd(a.fiscalDeadlines);
     const other = a.rates.length + a.availability.length + a.ledger.length + a.documents.length + a.payments.length + a.goals.length + a.files.length + a.fiscalParams.length + a.fiscalDeadlines.length;
-    const report: MergeReport = { activities: a.activities.length, clients: a.clients.length, other, matchedClients: plan.matchedClients, skippedDuplicates: plan.skippedDuplicates };
+    const report: MergeReport = { activities: a.activities.length, clients: a.clients.length, other, matchedClients: plan.matchedClients, skippedDuplicates: plan.skippedDuplicates, updated: plan.updateClients.length + plan.updateActivities.length };
     await db.audit.add({ id: newId(), entity: 'database', entityId: 'all', action: 'import', changes: { added: { to: report } }, reason: `Aggiunta dati da backup del ${backup.exportedAt}`, at: new Date().toISOString() });
     return report;
   });

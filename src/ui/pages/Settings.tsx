@@ -83,6 +83,7 @@ export function Settings() {
     try {
       const r = await mergeBackup(v.data);
       const parts = [`${r.activities} attività aggiunte`];
+      if (r.updated) parts.push(`${r.updated} aggiornati`);
       if (r.clients) parts.push(`${r.clients} committenti nuovi`);
       if (r.other) parts.push(`${r.other} altri elementi`);
       if (r.skippedDuplicates) parts.push(`${r.skippedDuplicates} già presenti ignorate`);

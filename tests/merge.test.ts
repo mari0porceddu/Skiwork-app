@@ -64,4 +64,32 @@ describe('aggiungi dati da file', () => {
     const asd = (await db.clients.toArray()).find((c) => c.kind === 'asd')!;
     expect((await db.activities.get('x'))?.clientId).toBe(asd.id);
   });
+
+  it('aggiorna attività e committenti con lo stesso id se il file è più recente', async () => {
+    await saveRecord('clients', client({ id: 'c', name: 'Sci Club Esempio', shifts: { morning: { start: '09:00', end: '12:00' } } }));
+    await saveActivity(activity({ id: 'a1', clientId: 'c', date: '2026-12-05', start: '09:00', end: '12:00', shift: 'morning', status: 'planned' }));
+    await saveActivity(activity({ id: 'a2', clientId: 'c', date: '2026-12-06', start: '09:00', end: '12:00', shift: 'morning', status: 'planned' }));
+    await saveActivity(activity({ id: 'a3', clientId: 'c', date: '2026-12-07', title: 'Modificata a mano' }));
+    await db.activities.update('a1', { gcalEventId: 'ev1', gcalSyncedAt: 'x' });
+
+    const file = await backupOf(async () => {});
+    const later = '2099-01-01T00:00:00.000Z';
+    const local = await db.activities.toArray();
+    file.tables.clients = [{ ...(await db.clients.get('c'))!, shifts: { morning: { start: '08:45', end: '12:45' } }, updatedAt: later }];
+    file.tables.activities = [
+      { ...local.find((a) => a.id === 'a1')!, gcalEventId: undefined, gcalSyncedAt: undefined, start: '08:45', end: '12:45', status: 'cancelled', updatedAt: later },
+      { ...local.find((a) => a.id === 'a3')!, title: 'Vecchia', updatedAt: '2000-01-01T00:00:00.000Z' },
+    ];
+    file.tables.settings = [{ key: 'fiscalProfile', value: { 'Regime fiscale': { value: 'Esempio', status: 'to_verify' }, Note: { value: 'dal file', status: '' } } }];
+    await db.settings.put({ key: 'fiscalProfile', value: { Note: { value: 'mia nota', status: '' } } });
+
+    const r = await mergeBackup(file);
+    expect(r.updated).toBe(3);
+    expect(await db.activities.get('a1')).toMatchObject({ status: 'cancelled', start: '08:45', gcalEventId: 'ev1', gcalSyncedAt: 'x' });
+    expect(await db.activities.get('a2')).toMatchObject({ start: '08:45', end: '12:45' });
+    expect((await db.activities.get('a3'))?.title).toBe('Modificata a mano');
+    expect((await db.clients.get('c'))?.shifts?.morning).toEqual({ start: '08:45', end: '12:45' });
+    expect((await db.settings.get('fiscalProfile'))?.value).toEqual({ Note: { value: 'mia nota', status: '' }, 'Regime fiscale': { value: 'Esempio', status: 'to_verify' } });
+    expect((await mergeBackup(file)).updated).toBe(0);
+  });
 });
