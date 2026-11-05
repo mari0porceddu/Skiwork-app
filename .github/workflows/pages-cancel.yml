@@ -1,0 +1,22 @@
+# Sblocca GitHub Pages quando una pubblicazione resta "in corso" e blocca le successive.
+# Avvio manuale: Actions → Sblocca GitHub Pages → indica il commit indicato nell'errore.
+name: Sblocca GitHub Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment:
+        description: Commit della pubblicazione bloccata
+        required: true
+
+permissions:
+  pages: write
+
+jobs:
+  cancel:
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOYMENT: ${{ inputs.deployment }}
+        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/pages/deployments/${DEPLOYMENT}/cancel"
