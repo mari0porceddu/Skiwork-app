@@ -1,6 +1,8 @@
 /**
  * Sincronizzazione nei due sensi con il calendario Google "SkiWork", creato dall'app.
  * Invio: attività modificate dopo l'ultimo invio → evento creato/aggiornato; cancellate o eliminate → evento rimosso.
+ * Un solo calendario: se quello salvato manca si riusa un calendario "SkiWork" già creato dall'app (anche da un
+ * altro dispositivo) prima di crearne uno; gli eventuali doppioni vengono rinominati per poterli eliminare.
  * Ricezione: modifiche incrementali (syncToken) → attività aggiornate o nuove attività "da completare".
  */
 import { db } from '../db/db';
@@ -18,21 +20,43 @@ async function getSetting<T>(key: string, fallback: T): Promise<T> {
   return ((await db.settings.get(key))?.value as T | undefined) ?? fallback;
 }
 
-/** Id del calendario "SkiWork": quello salvato se esiste ancora, altrimenti ne crea uno nuovo. */
-export async function ensureCalendar(token: string): Promise<string> {
-  const saved = await getSetting<string | null>('calendarId', null);
-  if (saved) {
-    try {
-      await api(token, `${BASE}/calendars/${encodeURIComponent(saved)}`);
-      return saved;
-    } catch (e) {
-      if (!(e instanceof GoogleApiError) || (e.status !== 404 && e.status !== 410)) throw e;
-    }
+const CALENDAR_NAME = 'SkiWork';
+const DUPLICATE_NAME = 'SkiWork (doppione, puoi eliminarlo)';
+
+async function calendarExists(token: string, id: string): Promise<boolean> {
+  try {
+    await api(token, `${BASE}/calendars/${encodeURIComponent(id)}`);
+    return true;
+  } catch (e) {
+    if (e instanceof GoogleApiError && (e.status === 404 || e.status === 410)) return false;
+    throw e;
   }
-  const r = await api(token, `${BASE}/calendars`, { method: 'POST', ...json({ summary: 'SkiWork', description: 'Lezioni e allenamenti sincronizzati con SkiWork', timeZone: tz() }) });
-  const id = ((await r.json()) as { id: string }).id;
+}
+
+/** Calendari "SkiWork" creati dall'app e visibili con questo accesso; [] se Google non permette di elencarli. */
+async function appCalendars(token: string): Promise<string[]> {
+  try {
+    const r = (await (await api(token, `${BASE}/users/me/calendarList?minAccessRole=owner&maxResults=250`)).json()) as { items?: { id: string; summary?: string }[] };
+    return (r.items ?? []).filter((c) => c.summary === CALENDAR_NAME).map((c) => c.id).sort();
+  } catch (e) {
+    if (e instanceof GoogleApiError && e.status === 403) return [];
+    throw e;
+  }
+}
+
+/** Rinomina i doppioni (senza eliminarli: potrebbero contenere eventi aggiunti a mano). */
+async function markDuplicates(token: string, keep: string, all: string[]): Promise<void> {
+  for (const id of all) {
+    if (id === keep) continue;
+    await api(token, `${BASE}/calendars/${encodeURIComponent(id)}`, { method: 'PATCH', ...json({ summary: DUPLICATE_NAME }) }).catch(() => undefined);
+  }
+}
+
+async function useCalendar(id: string): Promise<string> {
   await setSetting('calendarId', id);
   await setSetting('calendarSyncToken', null);
+  // I collegamenti agli eventi valgono solo per il calendario precedente; quelli del calendario ritrovato
+  // vengono ricollegati alla prossima ricezione tramite l'id SkiWork salvato negli eventi.
   await db.activities.toCollection().modify((a: Activity) => {
     delete a.gcalEventId;
     delete a.gcalSyncedAt;
@@ -41,9 +65,32 @@ export async function ensureCalendar(token: string): Promise<string> {
   return id;
 }
 
+/** Id del calendario "SkiWork": quello salvato se esiste ancora, poi uno già creato dall'app, altrimenti uno nuovo. */
+export async function ensureCalendar(token: string): Promise<string> {
+  const saved = await getSetting<string | null>('calendarId', null);
+  const savedOk = saved ? await calendarExists(token, saved) : false;
+  if (savedOk && (await getSetting<boolean>('calendarDedupDone', false))) return saved!;
+  const found = await appCalendars(token);
+  const keep = savedOk ? saved! : found[0];
+  await markDuplicates(token, keep ?? '', found);
+  await setSetting('calendarDedupDone', true);
+  if (savedOk) return saved!;
+  if (keep) return useCalendar(keep);
+  const r = await api(token, `${BASE}/calendars`, { method: 'POST', ...json({ summary: CALENDAR_NAME, description: 'Lezioni e allenamenti sincronizzati con SkiWork', timeZone: tz() }) });
+  return useCalendar(((await r.json()) as { id: string }).id);
+}
+
 /** Aggiorna solo i metadati di sincronizzazione, senza toccare updatedAt né il registro modifiche. */
 async function markSynced(id: string, patch: Partial<Activity>): Promise<void> {
   await db.activities.update(id, patch);
+}
+
+async function deleteEvent(token: string, calUrl: string, eventId: string): Promise<void> {
+  try {
+    await api(token, `${calUrl}/${encodeURIComponent(eventId)}`, { method: 'DELETE' });
+  } catch (e) {
+    if (!(e instanceof GoogleApiError) || (e.status !== 404 && e.status !== 410)) throw e;
+  }
 }
 
 async function push(token: string, cal: string): Promise<number> {
@@ -51,11 +98,7 @@ async function push(token: string, cal: string): Promise<number> {
   let n = 0;
   const pendingDeletes = await getSetting<string[]>('gcalPendingDeletes', []);
   for (const eventId of pendingDeletes) {
-    try {
-      await api(token, `${calUrl}/${encodeURIComponent(eventId)}`, { method: 'DELETE' });
-    } catch (e) {
-      if (!(e instanceof GoogleApiError) || (e.status !== 404 && e.status !== 410)) throw e;
-    }
+    await deleteEvent(token, calUrl, eventId);
     n++;
   }
   if (pendingDeletes.length) await setSetting('gcalPendingDeletes', []);
@@ -63,6 +106,13 @@ async function push(token: string, cal: string): Promise<number> {
   const clients = new Map((await db.clients.toArray()).map((c) => [c.id, c.name]));
   for (const a of await db.activities.toArray()) {
     if (!needsPush(a)) continue;
+    if (a.status === 'cancelled') {
+      // Le attività cancellate non compaiono su Google.
+      if (a.gcalEventId) await deleteEvent(token, calUrl, a.gcalEventId);
+      await markSynced(a.id, { gcalEventId: undefined, gcalSyncedAt: a.updatedAt, gcalUpdated: undefined });
+      n++;
+      continue;
+    }
     const body = activityToEvent(a, a.clientId ? clients.get(a.clientId) : undefined, tz());
     let ev: GEvent;
     try {
@@ -133,6 +183,11 @@ async function pull(token: string, cal: string): Promise<{ created: number; upda
       const saved = await saveActivity(next, 'Modificata su Google Calendar');
       await markSynced(saved.id, { gcalSyncedAt: saved.updatedAt, gcalUpdated: ev.updated, ...(act.kind === 'cancel' ? { gcalEventId: undefined } : {}) });
       updated++;
+    } else if (act.kind === 'relink') {
+      // SkiWork resta la versione valida: l'evento verrà riallineato dall'invio che segue.
+      await markSynced(act.activity.id, { gcalEventId: ev.id, gcalSyncedAt: undefined, gcalUpdated: ev.updated });
+    } else if (act.kind === 'duplicate') {
+      await deleteEvent(token, `${BASE}/calendars/${encodeURIComponent(cal)}/events`, ev.id);
     } else {
       await markSynced(act.activity.id, { gcalUpdated: ev.updated });
     }
@@ -148,7 +203,19 @@ export interface CalendarReport {
 }
 
 /** Prima riceve da Google (così le modifiche fatte lì non vengono sovrascritte), poi invia. */
-export async function syncCalendar(token: string): Promise<CalendarReport> {
+export function syncCalendar(token: string): Promise<CalendarReport> {
+  // Una sola sincronizzazione alla volta (anche tra schede): due in parallelo creavano calendari doppi.
+  if (!running) {
+    const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+    const job: Promise<CalendarReport> = locks ? (locks.request('skiwork-calendar-sync', () => runSync(token)) as unknown as Promise<CalendarReport>) : runSync(token);
+    running = job.finally(() => (running = null));
+  }
+  return running;
+}
+
+let running: Promise<CalendarReport> | null = null;
+
+async function runSync(token: string): Promise<CalendarReport> {
   const cal = await ensureCalendar(token);
   const { created, updated } = await pull(token, cal);
   const sent = await push(token, cal);

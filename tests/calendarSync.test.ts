@@ -5,7 +5,7 @@ import type { GEvent } from '../src/domain/gcal';
 vi.mock('../src/config', () => ({ GOOGLE_CLIENT_ID: 'test-client' }));
 
 /** Calendario Google finto in memoria, con syncToken incrementale. */
-function fakeGoogle() {
+function fakeGoogle(calendars: { id: string; summary: string }[] = []) {
   const events = new Map<string, GEvent>();
   let clock = 0;
   let seq = 0;
@@ -21,7 +21,17 @@ function fakeGoogle() {
     const method = init?.method ?? 'GET';
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     const ok = (o: unknown) => new Response(JSON.stringify(o));
-    if (u.pathname === '/calendar/v3/calendars' && method === 'POST') return ok({ id: 'cal1' });
+    if (u.pathname === '/calendar/v3/calendars' && method === 'POST') {
+      calendars.push({ id: 'cal1', summary: body.summary });
+      return ok({ id: 'cal1' });
+    }
+    if (u.pathname === '/calendar/v3/users/me/calendarList') return ok({ items: calendars });
+    const cm = /^\/calendar\/v3\/calendars\/([^/]+)$/.exec(u.pathname);
+    if (cm && method === 'PATCH') {
+      const c = calendars.find((x) => x.id === decodeURIComponent(cm[1]!));
+      if (c) Object.assign(c, body);
+      return ok(c ?? {});
+    }
     if (u.pathname === '/calendar/v3/calendars/cal1' && method === 'GET') return ok({ id: 'cal1' });
     const m = /\/calendars\/cal1\/events(?:\/(.+))?$/.exec(u.pathname);
     if (!m) return new Response('', { status: 404 });
@@ -48,6 +58,7 @@ function fakeGoogle() {
   return {
     fetchFn,
     events,
+    calendars,
     /** Modifica fatta dall'utente direttamente in Google Calendar. */
     userEdit(ev: GEvent) {
       touch(ev);
@@ -107,5 +118,44 @@ describe('sincronizzazione Google Calendar', () => {
     expect(g.events.get(sent!.id)?.status).toBe('cancelled');
     expect(await syncCalendar('t')).toEqual({ sent: 0, created: 0, updated: 0 });
     expect(await D.db.activities.count()).toBe(1);
+  });
+
+  it('riusa il calendario SkiWork già esistente, rinomina i doppioni e non pubblica le attività cancellate', async () => {
+    const D = await import('../src/db/db');
+    D.useDatabase(new D.SkiWorkDB(`cal-${n++}`));
+    await D.db.open();
+    const { saveActivity } = await import('../src/db/repo');
+    const { syncCalendar } = await import('../src/sync/calendar');
+    const { activity } = await import('./fixtures');
+    // Su Google c'è già il calendario dell'app (es. creato da un'altra sincronizzazione) con l'evento di a1, più un doppione.
+    const g = fakeGoogle([{ id: 'zz-doppione', summary: 'SkiWork' }, { id: 'cal1', summary: 'SkiWork' }]);
+    vi.stubGlobal('fetch', g.fetchFn);
+    await saveActivity(activity({ id: 'a1', title: 'Allenamento', date: '2026-12-05', start: '08:45', end: '12:45', status: 'planned' }));
+    await saveActivity(activity({ id: 'a2', title: 'Vecchia bozza', date: '2027-01-02', status: 'cancelled' }));
+    g.userEdit({ id: 'old1', status: 'confirmed', summary: 'Allenamento', start: { dateTime: '2026-12-05T09:00:00' }, end: { dateTime: '2026-12-05T12:00:00' }, extendedProperties: { private: { skiworkId: 'a1' } } });
+    g.userEdit({ id: 'old2', status: 'confirmed', summary: 'Allenamento', start: { dateTime: '2026-12-05T09:00:00' }, end: { dateTime: '2026-12-05T12:00:00' }, extendedProperties: { private: { skiworkId: 'a1' } } });
+
+    // Due sincronizzazioni contemporanee (automatica + "Sincronizza ora") non creano un secondo calendario.
+    await Promise.all([syncCalendar('t'), syncCalendar('t')]);
+    const posts = g.fetchFn.mock.calls.filter(([url, init]) => String(url).endsWith('/calendar/v3/calendars') && init?.method === 'POST');
+    expect(posts).toHaveLength(0);
+    expect(g.calendars.find((c) => c.id === 'zz-doppione')?.summary).toBe('SkiWork (doppione, puoi eliminarlo)');
+    expect(await D.db.settings.get('calendarId')).toMatchObject({ value: 'cal1' });
+
+    // L'evento esistente viene ricollegato e riallineato agli orari di SkiWork; la copia in più eliminata.
+    const live = [...g.events.values()].filter((e) => e.status !== 'cancelled');
+    expect(live).toHaveLength(1);
+    expect(live[0]).toMatchObject({ start: { dateTime: '2026-12-05T08:45:00' } });
+    expect((await D.db.activities.get('a1'))?.gcalEventId).toBe(live[0]!.id);
+    // L'attività cancellata non è mai stata inviata.
+    expect([...g.events.values()].some((e) => e.extendedProperties?.private?.skiworkId === 'a2')).toBe(false);
+    expect(await syncCalendar('t')).toEqual({ sent: 0, created: 0, updated: 0 });
+
+    // Cancellata dopo l'invio → l'evento sparisce da Google invece di restare come "Cancellato".
+    await saveActivity({ ...(await D.db.activities.get('a1'))!, status: 'cancelled' });
+    await syncCalendar('t');
+    expect([...g.events.values()].filter((e) => e.status !== 'cancelled')).toHaveLength(0);
+    expect(await syncCalendar('t')).toEqual({ sent: 0, created: 0, updated: 0 });
+    expect((await D.db.activities.get('a1'))?.status).toBe('cancelled');
   });
 });

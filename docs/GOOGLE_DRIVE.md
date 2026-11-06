@@ -23,3 +23,7 @@ Sincronizzazione (src/sync/calendar.ts, regole in src/domain/gcal.ts): prima ric
 (incrementali con syncToken), poi invia le attività modificate dopo l'ultimo invio. Gli eventi creati su Google
 diventano attività "Da completare" (tipologia, committente e compenso da indicare). Un'attività modificata in
 entrambi i posti tiene la versione di SkiWork. Eliminare un evento su Google cancella l'attività se non è completata.
+Le attività cancellate non compaiono su Google (il loro evento viene rimosso). Il calendario è sempre uno: se quello
+salvato manca, l'app riusa un calendario "SkiWork" che ha già creato prima di crearne uno nuovo, ricollega i suoi
+eventi tramite l'id SkiWork ed elimina le copie doppie; gli altri calendari "SkiWork" vengono rinominati
+"SkiWork (doppione, puoi eliminarlo)". Le sincronizzazioni non partono mai in parallelo.

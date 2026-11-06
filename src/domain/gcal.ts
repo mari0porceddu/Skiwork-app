@@ -42,7 +42,7 @@ export function activityToEvent(a: Activity, clientName: string | undefined, tim
   const summary = [a.title || ACTIVITY_TYPE_LABEL[a.type], clientName].filter(Boolean).join(' · ');
   const details = [a.shift ? SHIFT_LABEL[a.shift] : null, a.level ? LESSON_LEVEL_LABEL[a.level] : null].filter(Boolean).join(' · ');
   return {
-    summary: a.status === 'cancelled' ? `Cancellato: ${summary}` : summary,
+    summary,
     location: a.location || undefined,
     description: [details, a.notes].filter(Boolean).join('\n\n') || undefined,
     start: { dateTime: `${a.date}T${a.start}:00`, timeZone },
@@ -79,7 +79,11 @@ export type PullAction =
   | { kind: 'create'; event: GEvent; slots: ReturnType<typeof eventSlots> }
   | { kind: 'update'; event: GEvent; activity: Activity; changes: EventChanges }
   | { kind: 'cancel'; event: GEvent; activity: Activity }
-  | { kind: 'seen'; event: GEvent; activity: Activity };
+  | { kind: 'seen'; event: GEvent; activity: Activity }
+  /** Evento di SkiWork non ancora collegato su questo dispositivo (es. calendario ritrovato): si ricollega e SkiWork lo riallinea. */
+  | { kind: 'relink'; event: GEvent; activity: Activity }
+  /** Seconda copia di un evento SkiWork già collegato: va eliminata. */
+  | { kind: 'duplicate'; event: GEvent };
 
 /**
  * Cosa fare con gli eventi arrivati da Google.
@@ -92,8 +96,19 @@ export function planPull(events: GEvent[], activities: Activity[]): PullAction[]
   const byEvent = new Map(activities.filter((a) => a.gcalEventId).map((a) => [a.gcalEventId!, a]));
   const byId = new Map(activities.map((a) => [a.id, a]));
   const out: PullAction[] = [];
+  const relinked = new Set<string>();
   for (const ev of events) {
-    const linked = byEvent.get(ev.id) ?? byId.get(ev.extendedProperties?.private?.skiworkId ?? '');
+    const own = byId.get(ev.extendedProperties?.private?.skiworkId ?? '');
+    if (!byEvent.has(ev.id) && own) {
+      if (ev.status === 'cancelled' || own.status === 'cancelled') continue;
+      if ((own.gcalEventId && own.gcalEventId !== ev.id) || relinked.has(own.id)) out.push({ kind: 'duplicate', event: ev });
+      else {
+        relinked.add(own.id);
+        out.push({ kind: 'relink', event: ev, activity: own });
+      }
+      continue;
+    }
+    const linked = byEvent.get(ev.id) ?? own;
     if (!linked) {
       if (ev.status === 'cancelled') continue;
       // Evento creato da SkiWork per un'attività poi eliminata: non va reimportato.
