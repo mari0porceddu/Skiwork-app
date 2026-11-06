@@ -7,6 +7,7 @@ vi.mock('../src/config', () => ({ GOOGLE_CLIENT_ID: 'test-client' }));
 /** Calendario Google finto in memoria, con syncToken incrementale. */
 function fakeGoogle(calendars: { id: string; summary: string }[] = []) {
   const events = new Map<string, GEvent>();
+  const deleted = new Set<string>();
   let clock = 0;
   let seq = 0;
   const changedAt = new Map<string, number>();
@@ -22,18 +23,24 @@ function fakeGoogle(calendars: { id: string; summary: string }[] = []) {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     const ok = (o: unknown) => new Response(JSON.stringify(o));
     if (u.pathname === '/calendar/v3/calendars' && method === 'POST') {
-      calendars.push({ id: 'cal1', summary: body.summary });
-      return ok({ id: 'cal1' });
+      const id = calendars.some((c) => c.id === 'cal1') || deleted.has('cal1') ? `cal${calendars.length + deleted.size + 1}` : 'cal1';
+      calendars.push({ id, summary: body.summary });
+      return ok({ id });
     }
     if (u.pathname === '/calendar/v3/users/me/calendarList') return ok({ items: calendars });
+    const le = /^\/calendar\/v3\/users\/me\/calendarList\/(.+)$/.exec(u.pathname);
+    if (le) return calendars.some((c) => c.id === decodeURIComponent(le[1]!)) ? ok({ id: le[1] }) : new Response('', { status: 404 });
+    const live = /^\/calendar\/v3\/calendars\/([^/]+)/.exec(u.pathname);
+    if (live && deleted.has(decodeURIComponent(live[1]!))) return new Response('', { status: 404 });
     const cm = /^\/calendar\/v3\/calendars\/([^/]+)$/.exec(u.pathname);
     if (cm && method === 'PATCH') {
       const c = calendars.find((x) => x.id === decodeURIComponent(cm[1]!));
       if (c) Object.assign(c, body);
       return ok(c ?? {});
     }
-    if (u.pathname === '/calendar/v3/calendars/cal1' && method === 'GET') return ok({ id: 'cal1' });
-    const m = /\/calendars\/cal1\/events(?:\/(.+))?$/.exec(u.pathname);
+    const cg = /^\/calendar\/v3\/calendars\/([^/]+)$/.exec(u.pathname);
+    if (cg && method === 'GET') return ok({ id: cg[1] });
+    const m = /\/calendars\/[^/]+\/events(?:\/(.+))?$/.exec(u.pathname);
     if (!m) return new Response('', { status: 404 });
     const id = m[1] ? decodeURIComponent(m[1]) : undefined;
     if (!id && method === 'POST') {
@@ -59,6 +66,12 @@ function fakeGoogle(calendars: { id: string; summary: string }[] = []) {
     fetchFn,
     events,
     calendars,
+    /** L'utente elimina un calendario da Google Calendar. */
+    deleteCalendar(id: string) {
+      deleted.add(id);
+      calendars.splice(calendars.findIndex((c) => c.id === id), 1);
+      events.clear();
+    },
     /** Modifica fatta dall'utente direttamente in Google Calendar. */
     userEdit(ev: GEvent) {
       touch(ev);
@@ -157,5 +170,26 @@ describe('sincronizzazione Google Calendar', () => {
     expect([...g.events.values()].filter((e) => e.status !== 'cancelled')).toHaveLength(0);
     expect(await syncCalendar('t')).toEqual({ sent: 0, created: 0, updated: 0 });
     expect((await D.db.activities.get('a1'))?.status).toBe('cancelled');
+  });
+
+  it('ricrea il calendario se è stato eliminato su Google e reinvia le attività', async () => {
+    const D = await import('../src/db/db');
+    D.useDatabase(new D.SkiWorkDB(`cal-${n++}`));
+    await D.db.open();
+    const { saveActivity } = await import('../src/db/repo');
+    const { syncCalendar } = await import('../src/sync/calendar');
+    const { activity } = await import('./fixtures');
+    const g = fakeGoogle();
+    vi.stubGlobal('fetch', g.fetchFn);
+    await saveActivity(activity({ id: 'a1', title: 'Allenamento', date: '2026-12-05', status: 'planned' }));
+    await syncCalendar('t');
+    expect(await D.db.settings.get('calendarId')).toMatchObject({ value: 'cal1' });
+
+    g.deleteCalendar('cal1');
+    expect((await syncCalendar('t')).sent).toBe(1);
+    const cal = (await D.db.settings.get('calendarId'))?.value;
+    expect(cal).not.toBe('cal1');
+    expect(g.calendars.map((c) => c.id)).toEqual([cal]);
+    expect([...g.events.values()].filter((e) => e.extendedProperties?.private?.skiworkId === 'a1')).toHaveLength(1);
   });
 });

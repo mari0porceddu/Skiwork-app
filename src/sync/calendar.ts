@@ -23,14 +23,28 @@ async function getSetting<T>(key: string, fallback: T): Promise<T> {
 const CALENDAR_NAME = 'SkiWork';
 const DUPLICATE_NAME = 'SkiWork (doppione, puoi eliminarlo)';
 
+const gone = (e: unknown) => e instanceof GoogleApiError && (e.status === 403 || e.status === 404 || e.status === 410);
+
+/** Il calendario c'è ancora e non è stato eliminato dall'elenco dell'utente. */
 async function calendarExists(token: string, id: string): Promise<boolean> {
   try {
     await api(token, `${BASE}/calendars/${encodeURIComponent(id)}`);
-    return true;
   } catch (e) {
-    if (e instanceof GoogleApiError && (e.status === 404 || e.status === 410)) return false;
+    if (gone(e)) return false;
     throw e;
   }
+  try {
+    await api(token, `${BASE}/users/me/calendarList/${encodeURIComponent(id)}`);
+  } catch (e) {
+    if (e instanceof GoogleApiError && (e.status === 404 || e.status === 410)) return false;
+  }
+  return true;
+}
+
+/** Dimentica il calendario salvato: alla prossima sincronizzazione se ne crea (o ritrova) uno. */
+export async function forgetCalendar(): Promise<void> {
+  await setSetting('calendarId', null);
+  await setSetting('calendarDedupDone', false);
 }
 
 /** Calendari "SkiWork" creati dall'app e visibili con questo accesso; [] se Google non permette di elencarli. */
@@ -215,7 +229,18 @@ export function syncCalendar(token: string): Promise<CalendarReport> {
 
 let running: Promise<CalendarReport> | null = null;
 
-async function runSync(token: string): Promise<CalendarReport> {
+async function runSync(token: string, retried = false): Promise<CalendarReport> {
+  try {
+    return await syncOnce(token);
+  } catch (e) {
+    // Calendario eliminato su Google mentre era salvato: se ne usa un altro (o uno nuovo) e si riprova una volta.
+    if (retried || !(e instanceof GoogleApiError) || (e.status !== 404 && e.status !== 410)) throw e;
+    await forgetCalendar();
+    return runSync(token, true);
+  }
+}
+
+async function syncOnce(token: string): Promise<CalendarReport> {
   const cal = await ensureCalendar(token);
   const { created, updated } = await pull(token, cal);
   const sent = await push(token, cal);

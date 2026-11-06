@@ -24,7 +24,7 @@ import { deleteRecord, importIcsEvents, saveClientAndRealignShifts, saveRecord, 
 import { createBackupFile } from '../backupActions';
 import { CALENDAR_SCOPE, driveAvailable, driveToken, forgetDriveToken, grantedScope, startDriveAuth, takeAuthResult } from '../../sync/drive';
 import { recoverFromDrive, syncToDrive } from '../../sync/driveSync';
-import { syncCalendar } from '../../sync/calendar';
+import { forgetCalendar, syncCalendar } from '../../sync/calendar';
 import { SHIFT_KEYS, SHIFT_LABEL, shiftTimes } from '../../domain/shifts';
 import { EmptyState, Field, MoneyInput, Segmented } from '../components/fields';
 import { Sheet } from '../components/Sheet';
@@ -713,6 +713,14 @@ function CalendarSection() {
             ) : (
               <button className="btn primary" onClick={() => startDriveAuth('calendar')}>
                 Ricollega
+              </button>
+            )}
+            {granted && token && (
+              <button className="btn" disabled={busy} onClick={async () => {
+                await forgetCalendar();
+                await syncNow();
+              }}>
+                Ricrea calendario
               </button>
             )}
             <button className="btn ghost" disabled={busy} onClick={async () => {
